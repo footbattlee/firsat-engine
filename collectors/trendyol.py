@@ -35,17 +35,19 @@ OLD_PRICE_SELECTORS = [
     "[class~='old-price']",
 ]
 
-PRICE_PATTERN = r"(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(?:TL|₺)"
+PRICE_PATTERN = re.compile(
+    r"(?P<raw>\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(?:TL|₺)",
+    flags=re.I,
+)
 
-# These words indicate a campaign/benefit amount, not the product's selling price.
-PROMO_AMOUNT_WORDS = [
+PROMO_WORDS = (
     "kupon",
     "indirim",
     "cashback",
     "puan",
     "kazanç",
     "kazanc",
-]
+)
 
 
 def to_float(raw: str | None):
@@ -57,58 +59,66 @@ def to_float(raw: str | None):
         return None
 
 
+def is_promo_price(text: str, start: int, end: int) -> bool:
+    """Decide whether a TL amount belongs to a campaign label instead of product price."""
+    lower = text.casefold()
+
+    # Check a tight context around the amount so one promo phrase on the same line
+    # does not cause real product prices later in the line to be discarded.
+    left = lower[max(0, start - 35):start]
+    right = lower[end:min(len(lower), end + 35)]
+    around = left + " " + right
+
+    if any(word in around for word in PROMO_WORDS):
+        return True
+
+    # Common forms: "750 TL'ye 150 TL indirim", "200 TL kupon".
+    tail = lower[end:min(len(lower), end + 50)]
+    if "tl'ye" in lower[max(0, start - 5):min(len(lower), end + 8)]:
+        return True
+    if any(word in tail for word in PROMO_WORDS):
+        return True
+
+    return False
+
+
 def extract_price_mentions(text: str | None):
-    """Return actual product price mentions while ignoring campaign amounts."""
+    """Extract actual product price mentions and ignore coupon/discount amounts."""
     if not text:
         return []
 
+    normalized = text.replace("\xa0", " ")
     mentions = []
-    lines = text.replace("\xa0", " ").splitlines()
 
-    for line in lines:
-        clean = line.strip()
-        if not clean:
+    for match in PRICE_PATTERN.finditer(normalized):
+        if is_promo_price(normalized, match.start(), match.end()):
             continue
 
-        lower = clean.casefold()
-
-        # Examples that must NOT become price:
-        # "200 TL Kupon"
-        # "Sepette 200 TL İndirim"
-        # "750 TL'ye 150 TL İndirim"
-        if any(word in lower for word in PROMO_AMOUNT_WORDS):
+        value = to_float(match.group("raw"))
+        if value is None:
             continue
 
-        for raw in re.findall(PRICE_PATTERN, clean, flags=re.I):
-            value = to_float(raw)
-            if value is not None:
-                mentions.append({"value": value, "text": clean})
+        mentions.append(
+            {
+                "value": value,
+                "text": match.group(0).strip(),
+                "start": match.start(),
+            }
+        )
 
-    return mentions
+    # DOM may repeat the same label/price. Remove only immediately repeated values.
+    deduped = []
+    for mention in mentions:
+        if deduped and mention["value"] == deduped[-1]["value"]:
+            continue
+        deduped.append(mention)
 
-
-def extract_price_values(text: str | None):
-    return [m["value"] for m in extract_price_mentions(text)]
+    return deduped
 
 
 def parse_price(text: str | None):
-    values = extract_price_values(text)
-    if values:
-        return values[0]
-
-    if not text:
-        return None
-
-    # Do not fall back to naked numbers when the text itself is a campaign amount.
-    lower = text.casefold()
-    if any(word in lower for word in PROMO_AMOUNT_WORDS):
-        return None
-
-    raw_match = re.search(
-        r"\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?",
-        text,
-    )
-    return to_float(raw_match.group(0)) if raw_match else None
+    mentions = extract_price_mentions(text)
+    return mentions[0]["value"] if mentions else None
 
 
 async def text_first(card, selectors):
@@ -177,15 +187,8 @@ def classify_prices(full_text: str, mentions):
         conditional_type = "trendyol_plus"
         return current, None, conditional, conditional_type
 
-    # Sepette/current discounted price is shown first, comparison/list price last.
-    if "sepette" in lower and len(values) >= 2:
-        current = values[0]
-        if values[-1] > current:
-            old = values[-1]
-        return current, old, None, None
-
-    # Standard discounted card: current first, old/list price last.
-    if len(values) >= 2 and values[0] < values[-1]:
+    # Current discounted/sepette price first, comparison/list price last.
+    if len(values) >= 2 and values[-1] > values[0]:
         current = values[0]
         old = values[-1]
 
@@ -199,20 +202,24 @@ async def extract_price_from_card(card):
         full_text = ""
 
     mentions = extract_price_mentions(full_text)
-    price, old_price, conditional_price, conditional_price_type = classify_prices(full_text, mentions)
+    price, old_price, conditional_price, conditional_price_type = classify_prices(
+        full_text, mentions
+    )
 
-    price_text = await text_first(card, CURRENT_PRICE_SELECTORS)
-    old_price_text = await text_first(card, OLD_PRICE_SELECTORS)
-
+    # Fallback only when full-card context yielded nothing.
     if price is None:
+        price_text = await text_first(card, CURRENT_PRICE_SELECTORS)
         price = parse_price(price_text)
 
-    if old_price is None:
+    if old_price is None and price is not None:
+        old_price_text = await text_first(card, OLD_PRICE_SELECTORS)
         candidate = parse_price(old_price_text)
-        if candidate is not None and price is not None and candidate > price:
+        if candidate is not None and candidate > price:
             old_price = candidate
 
-    debug_price_text = " | ".join(m["text"] for m in mentions)
+    debug_price_text = " | ".join(
+        f"{m['value']:.2f}" for m in mentions
+    )
 
     return (
         price,
