@@ -37,6 +37,16 @@ OLD_PRICE_SELECTORS = [
 
 PRICE_PATTERN = r"(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(?:TL|₺)"
 
+# These words indicate a campaign/benefit amount, not the product's selling price.
+PROMO_AMOUNT_WORDS = [
+    "kupon",
+    "indirim",
+    "cashback",
+    "puan",
+    "kazanç",
+    "kazanc",
+]
+
 
 def to_float(raw: str | None):
     if not raw:
@@ -48,7 +58,7 @@ def to_float(raw: str | None):
 
 
 def extract_price_mentions(text: str | None):
-    """Return price mentions while ignoring coupon/reward amounts."""
+    """Return actual product price mentions while ignoring campaign amounts."""
     if not text:
         return []
 
@@ -61,8 +71,12 @@ def extract_price_mentions(text: str | None):
             continue
 
         lower = clean.casefold()
-        # These TL amounts are benefits, not the product selling price.
-        if any(word in lower for word in ["kupon", "cashback", "puan", "kazanç", "kazanc"]):
+
+        # Examples that must NOT become price:
+        # "200 TL Kupon"
+        # "Sepette 200 TL İndirim"
+        # "750 TL'ye 150 TL İndirim"
+        if any(word in lower for word in PROMO_AMOUNT_WORDS):
             continue
 
         for raw in re.findall(PRICE_PATTERN, clean, flags=re.I):
@@ -83,6 +97,11 @@ def parse_price(text: str | None):
         return values[0]
 
     if not text:
+        return None
+
+    # Do not fall back to naked numbers when the text itself is a campaign amount.
+    lower = text.casefold()
+    if any(word in lower for word in PROMO_AMOUNT_WORDS):
         return None
 
     raw_match = re.search(
@@ -141,15 +160,6 @@ async def get_product_href(card):
 
 
 def classify_prices(full_text: str, mentions):
-    """
-    Returns normal current price, old price and optional conditional price.
-
-    Rules observed in current Trendyol cards:
-    - 'Sepette 1.099,99 TL / 1.299,99 TL' -> current 1099.99, old 1299.99
-    - '%15 983 TL / 1.159 TL' -> current 983, old 1159
-    - '679 TL Trendyol Plus ile 645,05 TL' -> current 679, Plus price 645.05
-    - '200 TL Kupon / 1.599,90 TL' -> coupon is ignored, current 1599.90
-    """
     values = [m["value"] for m in mentions]
     if not values:
         return None, None, None, None
@@ -160,22 +170,21 @@ def classify_prices(full_text: str, mentions):
     conditional = None
     conditional_type = None
 
-    # Membership-specific price should not be confused with old/current price.
+    # Normal price + Trendyol Plus special price.
     if "trendyol plus" in lower and len(values) >= 2:
         current = values[0]
         conditional = values[-1]
         conditional_type = "trendyol_plus"
         return current, None, conditional, conditional_type
 
-    # Sepette price is an immediately obtainable selling price; keep higher shown
-    # amount as comparison/old price when available.
+    # Sepette/current discounted price is shown first, comparison/list price last.
     if "sepette" in lower and len(values) >= 2:
         current = values[0]
         if values[-1] > current:
             old = values[-1]
         return current, old, None, None
 
-    # Discounted cards generally render current price first, crossed/list price last.
+    # Standard discounted card: current first, old/list price last.
     if len(values) >= 2 and values[0] < values[-1]:
         current = values[0]
         old = values[-1]
@@ -184,7 +193,6 @@ def classify_prices(full_text: str, mentions):
 
 
 async def extract_price_from_card(card):
-    # Use full card context so coupon/Plus/sepette labels can be interpreted correctly.
     try:
         full_text = (await card.inner_text()).strip()
     except Exception:
@@ -193,7 +201,6 @@ async def extract_price_from_card(card):
     mentions = extract_price_mentions(full_text)
     price, old_price, conditional_price, conditional_price_type = classify_prices(full_text, mentions)
 
-    # If full-card parsing did not find a price, try known price elements.
     price_text = await text_first(card, CURRENT_PRICE_SELECTORS)
     old_price_text = await text_first(card, OLD_PRICE_SELECTORS)
 
@@ -205,7 +212,6 @@ async def extract_price_from_card(card):
         if candidate is not None and price is not None and candidate > price:
             old_price = candidate
 
-    # Keep compact diagnostics during test phase.
     debug_price_text = " | ".join(m["text"] for m in mentions)
 
     return (
