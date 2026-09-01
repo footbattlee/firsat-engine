@@ -22,8 +22,7 @@ PRICE_PATTERN = re.compile(
     flags=re.I,
 )
 
-# Bu kelimeleri içeren satırlardaki TL tutarları ürün fiyatı değildir.
-IGNORE_PRICE_WORDS = (
+PROMO_WORDS = (
     "indirim",
     "kupon",
     "puan",
@@ -43,12 +42,15 @@ def to_float(raw: str | None):
         return None
 
 
-def extract_current_price(text: str | None):
-    """Karttaki ilk gerçek satış fiyatını döndürür.
+def parse_first_price(text: str | None):
+    if not text:
+        return None
+    match = PRICE_PATTERN.search(text.replace("\xa0", " "))
+    return to_float(match.group(1)) if match else None
 
-    Eski fiyat, kupon, indirim tutarı ve Plus fiyatı ile ilgilenmez.
-    Fiyat geçmişini biz kendi veritabanımızda tutacağız.
-    """
+
+def fallback_price_from_text(text: str | None):
+    """Son çare: kampanya satırlarını atlayıp ilk normal TL fiyatını al."""
     if not text:
         return None
 
@@ -56,16 +58,10 @@ def extract_current_price(text: str | None):
         clean = line.strip()
         if not clean:
             continue
-
         lower = clean.casefold()
-        if any(word in lower for word in IGNORE_PRICE_WORDS):
+        if any(word in lower for word in PROMO_WORDS):
             continue
-
-        match = PRICE_PATTERN.search(clean)
-        if not match:
-            continue
-
-        value = to_float(match.group(1))
+        value = parse_first_price(clean)
         if value is not None:
             return value
 
@@ -120,9 +116,75 @@ async def get_product_href(card):
     return None
 
 
+async def extract_current_price(card):
+    """Kart içindeki gerçek satış fiyatı DOM elemanını seçer.
+
+    Kupon/indirim tutarı, eski fiyat ve üyelik fiyatı adaylarını puan düşürerek
+    dışarıda bırakır. Regex sadece seçilen fiyat elemanının içindeki sayıyı okur.
+    """
+    try:
+        candidates = await card.evaluate(
+            """
+            card => {
+              const nodes = [...card.querySelectorAll(
+                "[data-testid*='price'], [class*='price'], [class*='Price'], " +
+                "[class*='prc-'], [class*='selling'], [class*='discounted']"
+              )];
+
+              const promoWords = ['indirim','kupon','puan','cashback','kazanç','kazanc','trendyol plus'];
+              const goodWords = ['current','selling','discounted','sale','prc-box-dscntd','prc-box-sllng'];
+              const badWords = ['old','original','list','strike','crossed','campaign','coupon','benefit'];
+              const moneyRe = /(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(?:TL|₺)/i;
+
+              const result = [];
+              for (let i = 0; i < nodes.length; i++) {
+                const el = nodes[i];
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden') continue;
+
+                const text = (el.innerText || el.textContent || '').trim();
+                if (!moneyRe.test(text)) continue;
+
+                const cls = String(el.className || '').toLowerCase();
+                const testid = String(el.getAttribute('data-testid') || '').toLowerCase();
+                const meta = cls + ' ' + testid;
+                const own = text.toLowerCase();
+                const parent = (el.parentElement?.innerText || '').toLowerCase();
+
+                let score = 0;
+                if (goodWords.some(w => meta.includes(w))) score += 100;
+                if (meta.includes('price')) score += 35;
+                if (badWords.some(w => meta.includes(w))) score -= 140;
+                if (promoWords.some(w => own.includes(w))) score -= 180;
+                if (promoWords.some(w => parent.includes(w)) && !goodWords.some(w => meta.includes(w))) score -= 80;
+                if (el.children.length === 0) score += 20;
+                if ((text.match(/TL|₺/gi) || []).length === 1) score += 15;
+
+                result.push({ text, score, order: i, meta });
+              }
+
+              result.sort((a, b) => (b.score - a.score) || (a.order - b.order));
+              return result.slice(0, 20);
+            }
+            """
+        )
+    except Exception:
+        candidates = []
+
+    for candidate in candidates:
+        value = parse_first_price(candidate.get("text"))
+        if value is not None and candidate.get("score", 0) >= 0:
+            return value
+
+    try:
+        card_text = (await card.inner_text()).strip()
+    except Exception:
+        card_text = ""
+
+    return fallback_price_from_text(card_text)
+
+
 def clean_brand(brand_text: str | None, title: str | None, product_url: str):
-    # Trendyol bazı kartlarda brand alanına "Marka + Ürün adı" veriyor.
-    # Ürün adını sondan çıkararak sadece markayı bırakıyoruz.
     if brand_text and title and brand_text.endswith(title):
         brand = brand_text[: -len(title)].strip()
         if brand:
@@ -131,7 +193,6 @@ def clean_brand(brand_text: str | None, title: str | None, product_url: str):
     if brand_text and title and brand_text != title:
         return brand_text.strip()
 
-    # Fallback: URL'deki ilk path segmenti genellikle marka slug'ıdır.
     parts = [p for p in urlparse(product_url).path.split("/") if p]
     if parts:
         return parts[0].replace("-", " ").title()
@@ -163,12 +224,7 @@ async def extract_card(card):
     if not title:
         title = await attr_first(card, ["img"], "alt")
 
-    try:
-        card_text = (await card.inner_text()).strip()
-    except Exception:
-        card_text = ""
-
-    price = extract_current_price(card_text)
+    price = await extract_current_price(card)
 
     image_url = await attr_first(card, ["img"], "src")
     if not image_url:
