@@ -2,7 +2,7 @@ import asyncio
 import json
 import re
 from pathlib import Path
-from urllib.parse import quote_plus, urljoin
+from urllib.parse import quote_plus, urljoin, urlparse
 
 from playwright.async_api import async_playwright
 
@@ -17,36 +17,20 @@ CARD_SELECTORS = [
     ".product-card",
 ]
 
-CURRENT_PRICE_SELECTORS = [
-    "[data-testid='price-current-price']",
-    ".price-current-price",
-    ".prc-box-dscntd",
-    ".prc-box-sllng",
-    ".product-price",
-    "[class~='discounted-price']",
-    "[class~='selling-price']",
-]
-
-OLD_PRICE_SELECTORS = [
-    "[data-testid='price-original-price']",
-    ".price-original-price",
-    ".prc-box-orgnl",
-    ".original-price",
-    "[class~='old-price']",
-]
-
 PRICE_PATTERN = re.compile(
-    r"(?P<raw>\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(?:TL|₺)",
+    r"(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(?:TL|₺)",
     flags=re.I,
 )
 
-PROMO_WORDS = (
-    "kupon",
+# Bu kelimeleri içeren satırlardaki TL tutarları ürün fiyatı değildir.
+IGNORE_PRICE_WORDS = (
     "indirim",
-    "cashback",
+    "kupon",
     "puan",
+    "cashback",
     "kazanç",
     "kazanc",
+    "trendyol plus",
 )
 
 
@@ -59,66 +43,33 @@ def to_float(raw: str | None):
         return None
 
 
-def is_promo_price(text: str, start: int, end: int) -> bool:
-    """Decide whether a TL amount belongs to a campaign label instead of product price."""
-    lower = text.casefold()
+def extract_current_price(text: str | None):
+    """Karttaki ilk gerçek satış fiyatını döndürür.
 
-    # Check a tight context around the amount so one promo phrase on the same line
-    # does not cause real product prices later in the line to be discarded.
-    left = lower[max(0, start - 35):start]
-    right = lower[end:min(len(lower), end + 35)]
-    around = left + " " + right
-
-    if any(word in around for word in PROMO_WORDS):
-        return True
-
-    # Common forms: "750 TL'ye 150 TL indirim", "200 TL kupon".
-    tail = lower[end:min(len(lower), end + 50)]
-    if "tl'ye" in lower[max(0, start - 5):min(len(lower), end + 8)]:
-        return True
-    if any(word in tail for word in PROMO_WORDS):
-        return True
-
-    return False
-
-
-def extract_price_mentions(text: str | None):
-    """Extract actual product price mentions and ignore coupon/discount amounts."""
+    Eski fiyat, kupon, indirim tutarı ve Plus fiyatı ile ilgilenmez.
+    Fiyat geçmişini biz kendi veritabanımızda tutacağız.
+    """
     if not text:
-        return []
+        return None
 
-    normalized = text.replace("\xa0", " ")
-    mentions = []
-
-    for match in PRICE_PATTERN.finditer(normalized):
-        if is_promo_price(normalized, match.start(), match.end()):
+    for line in text.replace("\xa0", " ").splitlines():
+        clean = line.strip()
+        if not clean:
             continue
 
-        value = to_float(match.group("raw"))
-        if value is None:
+        lower = clean.casefold()
+        if any(word in lower for word in IGNORE_PRICE_WORDS):
             continue
 
-        mentions.append(
-            {
-                "value": value,
-                "text": match.group(0).strip(),
-                "start": match.start(),
-            }
-        )
-
-    # DOM may repeat the same label/price. Remove only immediately repeated values.
-    deduped = []
-    for mention in mentions:
-        if deduped and mention["value"] == deduped[-1]["value"]:
+        match = PRICE_PATTERN.search(clean)
+        if not match:
             continue
-        deduped.append(mention)
 
-    return deduped
+        value = to_float(match.group(1))
+        if value is not None:
+            return value
 
-
-def parse_price(text: str | None):
-    mentions = extract_price_mentions(text)
-    return mentions[0]["value"] if mentions else None
+    return None
 
 
 async def text_first(card, selectors):
@@ -169,65 +120,23 @@ async def get_product_href(card):
     return None
 
 
-def classify_prices(full_text: str, mentions):
-    values = [m["value"] for m in mentions]
-    if not values:
-        return None, None, None, None
+def clean_brand(brand_text: str | None, title: str | None, product_url: str):
+    # Trendyol bazı kartlarda brand alanına "Marka + Ürün adı" veriyor.
+    # Ürün adını sondan çıkararak sadece markayı bırakıyoruz.
+    if brand_text and title and brand_text.endswith(title):
+        brand = brand_text[: -len(title)].strip()
+        if brand:
+            return brand
 
-    lower = full_text.casefold()
-    current = values[0]
-    old = None
-    conditional = None
-    conditional_type = None
+    if brand_text and title and brand_text != title:
+        return brand_text.strip()
 
-    # Normal price + Trendyol Plus special price.
-    if "trendyol plus" in lower and len(values) >= 2:
-        current = values[0]
-        conditional = values[-1]
-        conditional_type = "trendyol_plus"
-        return current, None, conditional, conditional_type
+    # Fallback: URL'deki ilk path segmenti genellikle marka slug'ıdır.
+    parts = [p for p in urlparse(product_url).path.split("/") if p]
+    if parts:
+        return parts[0].replace("-", " ").title()
 
-    # Current discounted/sepette price first, comparison/list price last.
-    if len(values) >= 2 and values[-1] > values[0]:
-        current = values[0]
-        old = values[-1]
-
-    return current, old, conditional, conditional_type
-
-
-async def extract_price_from_card(card):
-    try:
-        full_text = (await card.inner_text()).strip()
-    except Exception:
-        full_text = ""
-
-    mentions = extract_price_mentions(full_text)
-    price, old_price, conditional_price, conditional_price_type = classify_prices(
-        full_text, mentions
-    )
-
-    # Fallback only when full-card context yielded nothing.
-    if price is None:
-        price_text = await text_first(card, CURRENT_PRICE_SELECTORS)
-        price = parse_price(price_text)
-
-    if old_price is None and price is not None:
-        old_price_text = await text_first(card, OLD_PRICE_SELECTORS)
-        candidate = parse_price(old_price_text)
-        if candidate is not None and candidate > price:
-            old_price = candidate
-
-    debug_price_text = " | ".join(
-        f"{m['value']:.2f}" for m in mentions
-    )
-
-    return (
-        price,
-        old_price,
-        conditional_price,
-        conditional_price_type,
-        debug_price_text,
-    )
+    return brand_text
 
 
 async def extract_card(card):
@@ -237,7 +146,7 @@ async def extract_card(card):
 
     product_url = urljoin(BASE_URL, href.split("?")[0])
 
-    brand = await text_first(card, [
+    brand_text = await text_first(card, [
         ".prdct-desc-cntnr-ttl",
         "[class*='brand']",
         "[data-testid*='brand']",
@@ -254,13 +163,12 @@ async def extract_card(card):
     if not title:
         title = await attr_first(card, ["img"], "alt")
 
-    (
-        price,
-        old_price,
-        conditional_price,
-        conditional_price_type,
-        price_text,
-    ) = await extract_price_from_card(card)
+    try:
+        card_text = (await card.inner_text()).strip()
+    except Exception:
+        card_text = ""
+
+    price = extract_current_price(card_text)
 
     image_url = await attr_first(card, ["img"], "src")
     if not image_url:
@@ -268,18 +176,15 @@ async def extract_card(card):
     if image_url and image_url.startswith("//"):
         image_url = "https:" + image_url
 
+    brand = clean_brand(brand_text, title, product_url)
+
     return {
         "merchant": "Trendyol",
         "brand": brand,
         "title": title,
         "price": price,
-        "old_price": old_price,
-        "conditional_price": conditional_price,
-        "conditional_price_type": conditional_price_type,
         "image_url": image_url,
         "product_url": product_url,
-        "query": DEFAULT_QUERY,
-        "price_text": price_text,
     }
 
 
@@ -309,6 +214,7 @@ async def main():
 
         card_locator = None
         used_selector = None
+
         for selector in CARD_SELECTORS:
             locator = page.locator(selector)
             count = await locator.count()
@@ -336,8 +242,10 @@ async def main():
             item = await extract_card(card_locator.nth(i))
             if not item or not item["product_url"] or item["product_url"] in seen:
                 continue
+
             seen.add(item["product_url"])
             products.append(item)
+
             if len(products) >= LIMIT:
                 break
 
