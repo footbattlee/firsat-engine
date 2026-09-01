@@ -17,11 +17,6 @@ CARD_SELECTORS = [
     ".product-card",
 ]
 
-LINK_SELECTORS = [
-    "a[href*='-p-']",
-    "a[href*='/p-']",
-]
-
 
 def parse_price(text: str | None):
     if not text:
@@ -63,8 +58,36 @@ async def attr_first(card, selectors, attr):
     return None
 
 
+async def get_product_href(card):
+    # Bazı yeni Trendyol kartlarında .product-card elemanının kendisi link olabilir.
+    try:
+        if await card.evaluate("el => el.tagName.toLowerCase()") == "a":
+            href = await card.get_attribute("href")
+            if href:
+                return href
+    except Exception:
+        pass
+
+    # Kartın içinde herhangi bir ürün linki ara.
+    for selector in [
+        "a[href*='-p-']",
+        "a[href*='/p-']",
+        "a[href]",
+    ]:
+        try:
+            loc = card.locator(selector).first
+            if await loc.count():
+                href = await loc.get_attribute("href")
+                if href and not href.startswith("javascript:"):
+                    return href
+        except Exception:
+            pass
+
+    return None
+
+
 async def extract_card(card):
-    href = await attr_first(card, LINK_SELECTORS, "href")
+    href = await get_product_href(card)
     if not href:
         return None
 
@@ -73,32 +96,53 @@ async def extract_card(card):
     brand = await text_first(card, [
         ".prdct-desc-cntnr-ttl",
         "[class*='brand']",
+        "[data-testid*='brand']",
     ])
 
     title = await text_first(card, [
         ".prdct-desc-cntnr-name",
-        ".prdct-desc-cntnr-ttl + span",
+        ".prdct-desc-cntnr",
         "[class*='product-name']",
         "[class*='title']",
+        "[data-testid*='name']",
     ])
 
+    # Yeni kartlarda başlık bazen yalnızca img alt alanında bulunuyor.
     if not title:
-        title = await text_first(card, [".prdct-desc-cntnr", "a"])
+        title = await attr_first(card, ["img"], "alt")
+
+    full_text = ""
+    try:
+        full_text = (await card.inner_text()).strip()
+    except Exception:
+        pass
 
     price_text = await text_first(card, [
         ".prc-box-dscntd",
-        ".discounted",
         ".prc-box-sllng",
+        "[class*='discounted']",
+        "[class*='selling']",
         "[class*='price']",
+        "[data-testid*='price']",
     ])
 
     old_price_text = await text_first(card, [
         ".prc-box-orgnl",
-        ".original",
+        "[class*='original']",
         "[class*='old-price']",
     ])
 
+    # Selector ile fiyat bulunamazsa kart metnindeki TL değerlerini kullan.
+    if not price_text and full_text:
+        prices = re.findall(r"\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?\s*(?:TL|₺)", full_text, flags=re.I)
+        if prices:
+            price_text = prices[-1]
+        if len(prices) > 1 and not old_price_text:
+            old_price_text = prices[0]
+
     image_url = await attr_first(card, ["img"], "src")
+    if not image_url:
+        image_url = await attr_first(card, ["img"], "data-src")
     if image_url and image_url.startswith("//"):
         image_url = "https:" + image_url
 
@@ -125,7 +169,7 @@ async def main():
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/131.0.0.0 Safari/537.36"
+                "Chrome/140.0.0.0 Safari/537.36"
             ),
         )
         page = await context.new_page()
