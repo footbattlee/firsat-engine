@@ -17,8 +17,6 @@ CARD_SELECTORS = [
     ".product-card",
 ]
 
-# Fiyat için özellikle fiyat değerini taşıyan alanları kullanıyoruz.
-# Generic [class*='price'] kaldırıldı; kampanya/taksit tutarlarını fiyat sanabiliyordu.
 CURRENT_PRICE_SELECTORS = [
     "[data-testid='price-current-price']",
     ".price-current-price",
@@ -37,37 +35,44 @@ OLD_PRICE_SELECTORS = [
     "[class~='old-price']",
 ]
 
+PRICE_PATTERN = r"(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(?:TL|₺)"
+
+
+def to_float(raw: str | None):
+    if not raw:
+        return None
+    try:
+        return float(raw.replace(".", "").replace(",", "."))
+    except ValueError:
+        return None
+
+
+def extract_price_values(text: str | None):
+    if not text:
+        return []
+    text = text.replace("\xa0", " ").strip()
+    raws = re.findall(PRICE_PATTERN, text, flags=re.I)
+    result = []
+    for raw in raws:
+        value = to_float(raw)
+        if value is not None:
+            result.append(value)
+    return result
+
 
 def parse_price(text: str | None):
+    values = extract_price_values(text)
+    if values:
+        return values[0]
+
     if not text:
         return None
 
-    text = text.replace("\xa0", " ").strip()
-
-    # Önce TL/₺ ile doğrudan ilişkili değerleri yakala.
-    matches = re.findall(
-        r"(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(?:TL|₺)",
+    raw_match = re.search(
+        r"\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?",
         text,
-        flags=re.I,
     )
-
-    # Element sadece "1.299,90" gibi çıplak değer döndürürse de destekle.
-    if not matches:
-        matches = re.findall(
-            r"\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?",
-            text,
-        )
-
-    if not matches:
-        return None
-
-    raw = matches[-1]
-    value = raw.replace(".", "").replace(",", ".")
-
-    try:
-        return float(value)
-    except ValueError:
-        return None
+    return to_float(raw_match.group(0)) if raw_match else None
 
 
 async def text_first(card, selectors):
@@ -105,11 +110,7 @@ async def get_product_href(card):
     except Exception:
         pass
 
-    for selector in [
-        "a[href*='-p-']",
-        "a[href*='/p-']",
-        "a[href]",
-    ]:
+    for selector in ["a[href*='-p-']", "a[href*='/p-']", "a[href]"]:
         try:
             loc = card.locator(selector).first
             if await loc.count():
@@ -123,42 +124,42 @@ async def get_product_href(card):
 
 
 async def extract_price_from_card(card):
-    # 1) En güvenilir yol: doğrudan mevcut fiyat elementi.
     price_text = await text_first(card, CURRENT_PRICE_SELECTORS)
-    price = parse_price(price_text)
-
-    # 2) Eski fiyat ayrı alanda varsa al.
     old_price_text = await text_first(card, OLD_PRICE_SELECTORS)
-    old_price = parse_price(old_price_text)
 
-    # 3) Selector bulunamazsa yalnızca TL/₺ içeren metin düğümlerini tara.
-    # Kampanya metinlerindeki "15", "200" gibi çıplak sayıları artık fiyat saymıyoruz.
+    price_values = extract_price_values(price_text)
+    old_price_values = extract_price_values(old_price_text)
+
+    price = price_values[0] if price_values else parse_price(price_text)
+    old_price = old_price_values[0] if old_price_values else parse_price(old_price_text)
+
+    # Trendyol bazı kartlarda aynı element içinde iki fiyat gösteriyor:
+    # ilk değer güncel/sepette/indirimli fiyat, son değer normal-eski fiyat.
+    # Örn: "983 TL\n1.159 TL" veya "Sepette\n1.099,99 TL\n1.299,99 TL".
+    if len(price_values) >= 2:
+        price = price_values[0]
+        if old_price is None:
+            old_price = price_values[-1]
+            old_price_text = price_text
+
+    # Selector ile bulunamazsa kart içindeki TL/₺ metinlerini topla.
     if price is None:
         try:
-            tl_nodes = card.locator("text=/\\d[\\d.,]*\\s*(TL|₺)/i")
-            values = []
-            count = min(await tl_nodes.count(), 20)
-            for i in range(count):
-                try:
-                    txt = (await tl_nodes.nth(i).inner_text()).strip()
-                    val = parse_price(txt)
-                    if val is not None:
-                        values.append((val, txt))
-                except Exception:
-                    pass
-
-            # Kartta fiyatlar genellikle eski fiyat -> yeni fiyat şeklinde görünür.
-            # Son TL değerini mevcut fiyat kabul ediyoruz.
+            full_text = (await card.inner_text()).strip()
+            values = extract_price_values(full_text)
             if values:
-                price = values[-1][0]
-                price_text = values[-1][1]
-                if old_price is None and len(values) > 1:
-                    candidate = values[-2][0]
-                    if candidate > price:
-                        old_price = candidate
-                        old_price_text = values[-2][1]
+                price = values[0]
+                price_text = full_text
+                if old_price is None and len(values) >= 2:
+                    old_price = values[-1]
+                    old_price_text = full_text
         except Exception:
             pass
+
+    # Eski fiyat güncel fiyattan düşük/eşitse anlamsızdır; boş bırak.
+    if price is not None and old_price is not None and old_price <= price:
+        old_price = None
+        old_price_text = None
 
     return price, old_price, price_text, old_price_text
 
@@ -204,7 +205,6 @@ async def extract_card(card):
         "image_url": image_url,
         "product_url": product_url,
         "query": DEFAULT_QUERY,
-        # Test aşamasında fiyatın hangi metinden geldiğini görelim.
         "price_text": price_text,
         "old_price_text": old_price_text,
     }
