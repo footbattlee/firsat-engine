@@ -47,17 +47,34 @@ def to_float(raw: str | None):
         return None
 
 
-def extract_price_values(text: str | None):
+def extract_price_mentions(text: str | None):
+    """Return price mentions while ignoring coupon/reward amounts."""
     if not text:
         return []
-    text = text.replace("\xa0", " ").strip()
-    raws = re.findall(PRICE_PATTERN, text, flags=re.I)
-    result = []
-    for raw in raws:
-        value = to_float(raw)
-        if value is not None:
-            result.append(value)
-    return result
+
+    mentions = []
+    lines = text.replace("\xa0", " ").splitlines()
+
+    for line in lines:
+        clean = line.strip()
+        if not clean:
+            continue
+
+        lower = clean.casefold()
+        # These TL amounts are benefits, not the product selling price.
+        if any(word in lower for word in ["kupon", "cashback", "puan", "kazanç", "kazanc"]):
+            continue
+
+        for raw in re.findall(PRICE_PATTERN, clean, flags=re.I):
+            value = to_float(raw)
+            if value is not None:
+                mentions.append({"value": value, "text": clean})
+
+    return mentions
+
+
+def extract_price_values(text: str | None):
+    return [m["value"] for m in extract_price_mentions(text)]
 
 
 def parse_price(text: str | None):
@@ -123,45 +140,81 @@ async def get_product_href(card):
     return None
 
 
+def classify_prices(full_text: str, mentions):
+    """
+    Returns normal current price, old price and optional conditional price.
+
+    Rules observed in current Trendyol cards:
+    - 'Sepette 1.099,99 TL / 1.299,99 TL' -> current 1099.99, old 1299.99
+    - '%15 983 TL / 1.159 TL' -> current 983, old 1159
+    - '679 TL Trendyol Plus ile 645,05 TL' -> current 679, Plus price 645.05
+    - '200 TL Kupon / 1.599,90 TL' -> coupon is ignored, current 1599.90
+    """
+    values = [m["value"] for m in mentions]
+    if not values:
+        return None, None, None, None
+
+    lower = full_text.casefold()
+    current = values[0]
+    old = None
+    conditional = None
+    conditional_type = None
+
+    # Membership-specific price should not be confused with old/current price.
+    if "trendyol plus" in lower and len(values) >= 2:
+        current = values[0]
+        conditional = values[-1]
+        conditional_type = "trendyol_plus"
+        return current, None, conditional, conditional_type
+
+    # Sepette price is an immediately obtainable selling price; keep higher shown
+    # amount as comparison/old price when available.
+    if "sepette" in lower and len(values) >= 2:
+        current = values[0]
+        if values[-1] > current:
+            old = values[-1]
+        return current, old, None, None
+
+    # Discounted cards generally render current price first, crossed/list price last.
+    if len(values) >= 2 and values[0] < values[-1]:
+        current = values[0]
+        old = values[-1]
+
+    return current, old, conditional, conditional_type
+
+
 async def extract_price_from_card(card):
+    # Use full card context so coupon/Plus/sepette labels can be interpreted correctly.
+    try:
+        full_text = (await card.inner_text()).strip()
+    except Exception:
+        full_text = ""
+
+    mentions = extract_price_mentions(full_text)
+    price, old_price, conditional_price, conditional_price_type = classify_prices(full_text, mentions)
+
+    # If full-card parsing did not find a price, try known price elements.
     price_text = await text_first(card, CURRENT_PRICE_SELECTORS)
     old_price_text = await text_first(card, OLD_PRICE_SELECTORS)
 
-    price_values = extract_price_values(price_text)
-    old_price_values = extract_price_values(old_price_text)
-
-    price = price_values[0] if price_values else parse_price(price_text)
-    old_price = old_price_values[0] if old_price_values else parse_price(old_price_text)
-
-    # Trendyol bazı kartlarda aynı element içinde iki fiyat gösteriyor:
-    # ilk değer güncel/sepette/indirimli fiyat, son değer normal-eski fiyat.
-    # Örn: "983 TL\n1.159 TL" veya "Sepette\n1.099,99 TL\n1.299,99 TL".
-    if len(price_values) >= 2:
-        price = price_values[0]
-        if old_price is None:
-            old_price = price_values[-1]
-            old_price_text = price_text
-
-    # Selector ile bulunamazsa kart içindeki TL/₺ metinlerini topla.
     if price is None:
-        try:
-            full_text = (await card.inner_text()).strip()
-            values = extract_price_values(full_text)
-            if values:
-                price = values[0]
-                price_text = full_text
-                if old_price is None and len(values) >= 2:
-                    old_price = values[-1]
-                    old_price_text = full_text
-        except Exception:
-            pass
+        price = parse_price(price_text)
 
-    # Eski fiyat güncel fiyattan düşük/eşitse anlamsızdır; boş bırak.
-    if price is not None and old_price is not None and old_price <= price:
-        old_price = None
-        old_price_text = None
+    if old_price is None:
+        candidate = parse_price(old_price_text)
+        if candidate is not None and price is not None and candidate > price:
+            old_price = candidate
 
-    return price, old_price, price_text, old_price_text
+    # Keep compact diagnostics during test phase.
+    debug_price_text = " | ".join(m["text"] for m in mentions)
+
+    return (
+        price,
+        old_price,
+        conditional_price,
+        conditional_price_type,
+        debug_price_text,
+    )
 
 
 async def extract_card(card):
@@ -188,7 +241,13 @@ async def extract_card(card):
     if not title:
         title = await attr_first(card, ["img"], "alt")
 
-    price, old_price, price_text, old_price_text = await extract_price_from_card(card)
+    (
+        price,
+        old_price,
+        conditional_price,
+        conditional_price_type,
+        price_text,
+    ) = await extract_price_from_card(card)
 
     image_url = await attr_first(card, ["img"], "src")
     if not image_url:
@@ -202,11 +261,12 @@ async def extract_card(card):
         "title": title,
         "price": price,
         "old_price": old_price,
+        "conditional_price": conditional_price,
+        "conditional_price_type": conditional_price_type,
         "image_url": image_url,
         "product_url": product_url,
         "query": DEFAULT_QUERY,
         "price_text": price_text,
-        "old_price_text": old_price_text,
     }
 
 
