@@ -82,15 +82,23 @@ def load_data():
     merchants = sb_get("merchants", {"select": "id,name,slug"})
     existing = sb_get("deal_candidates", {"select": "id,canonical_product_id,status"})
 
-    since_90d = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
-    history = sb_get(
+    # Price history'yi REST tarafında tarih filtresine sokmuyoruz.
+    # Bazı PostgREST tarih parametreleri HTTP 400 döndürebildiği için
+    # kayıtları alıp 90 günlük filtreyi Python tarafında uyguluyoruz.
+    history_all = sb_get(
         "price_history",
         {
             "select": "offer_id,price,checked_at",
-            "checked_at": f"gte.{since_90d}",
             "order": "checked_at.desc",
         },
     )
+    since_90d = datetime.now(timezone.utc) - timedelta(days=90)
+    history = []
+    for row in history_all:
+        checked_at = parse_dt(row.get("checked_at"))
+        if checked_at and checked_at >= since_90d:
+            history.append(row)
+
     return canonical, matches, variants, offers, merchants, existing, history
 
 
