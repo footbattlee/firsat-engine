@@ -37,6 +37,12 @@ def normalize_text(value):
     return re.sub(r"\s+", " ", value).strip()
 
 
+def title_matches_query(title, query):
+    title_tokens = set(normalize_text(title).split())
+    query_tokens = [t for t in normalize_text(query).split() if len(t) >= 3]
+    return not query_tokens or any(token in title_tokens for token in query_tokens)
+
+
 def walk_json(value):
     if isinstance(value, dict):
         yield value
@@ -58,7 +64,7 @@ def product_json_ld(html):
     return None
 
 
-def extract_product_urls(html, limit):
+def extract_product_urls(html, max_candidates):
     soup = BeautifulSoup(html, "html.parser")
     out, seen = [], set()
     for a in soup.select("a[href]"):
@@ -68,7 +74,7 @@ def extract_product_urls(html, limit):
         if "/tr/product/" not in p.path.lower() or not p.path.lower().endswith(".html"): continue
         if url in seen: continue
         seen.add(url); out.append(url)
-        if len(out) >= limit: break
+        if len(out) >= max_candidates: break
     return out
 
 
@@ -133,14 +139,17 @@ def collect(query=DEFAULT_QUERY, limit=LIMIT):
     search_url = SEARCH_URL.format(query=quote_plus(query))
     print("Opening search:", search_url)
     r = fetch(session, search_url); print("Search HTTP:", r.status_code)
-    urls = extract_product_urls(r.text, limit); print("Discovered products:", len(urls))
+    urls = extract_product_urls(r.text, max(limit * 10, 50)); print("Candidate product URLs:", len(urls))
     products=[]; seen_skus=set()
     for i,url in enumerate(urls,1):
+        if len(products) >= limit: break
         try:
             time.sleep(REQUEST_DELAY_SECONDS)
             item=parse_product_page(url, fetch(session,url).text)
             if not item:
                 print(f"[{i}/{len(urls)}] SKIP: {url}"); continue
+            if not title_matches_query(item["title"], query):
+                print(f"[{i}/{len(urls)}] IRRELEVANT: {item['title'][:80]}"); continue
             if item["merchant_product_id"] in seen_skus:
                 print(f"[{i}/{len(urls)}] DUPLICATE SKU: {item['merchant_product_id']}"); continue
             seen_skus.add(item["merchant_product_id"]); products.append(item)
