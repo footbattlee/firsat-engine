@@ -11,6 +11,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 MIN_SCORE = float(os.getenv("MATCH_MIN_SCORE", "78"))
 MAX_GROUPS = int(os.getenv("MATCH_MAX_GROUPS", "30"))
+VOLUME_TOLERANCE_ML = int(os.getenv("MATCH_VOLUME_TOLERANCE_ML", "5"))
 
 STOPWORDS = {
     "termos", "matara", "bardak", "mug", "kupa", "pipetli", "paslanmaz", "celik",
@@ -160,7 +161,7 @@ def pair_score(a, b):
 
     vol_a = extract_volume_ml(a["title"])
     vol_b = extract_volume_ml(b["title"])
-    if vol_a and vol_b and abs(vol_a - vol_b) > 40:
+    if vol_a and vol_b and abs(vol_a - vol_b) > VOLUME_TOLERANCE_ML:
         return 0.0, "volume-conflict"
 
     colors_a = extract_colors(a["title"])
@@ -174,7 +175,7 @@ def pair_score(a, b):
     score = 48.0
     score += sim * 34.0
     score += model * 12.0
-    if vol_a and vol_b and abs(vol_a - vol_b) <= 40:
+    if vol_a and vol_b and abs(vol_a - vol_b) <= VOLUME_TOLERANCE_ML:
         score += 6.0
 
     return min(score, 99.0), "heuristic"
@@ -267,6 +268,7 @@ def print_groups(rows, groups):
     print("=" * 88)
     print(f"Aktif offer: {len(rows)}")
     print(f"Minimum eşleşme skoru: {MIN_SCORE:.1f}")
+    print(f"Hacim toleransı: {VOLUME_TOLERANCE_ML} ml")
     print(f"Bulunan cross-store grup: {len(groups)}")
     print("NOT: Bu sürüm veritabanını değiştirmez; sadece eşleşme adaylarını gösterir.\n")
 
@@ -281,7 +283,9 @@ def print_groups(rows, groups):
         for m in members:
             mark = "  <-- EN UCUZ" if m is cheapest else ""
             gtin = valid_gtin(m.get("gtin")) or "-"
-            print(f"  {m['merchant']:<14} {m['price']:>10.2f} {m['currency']} | GTIN {gtin} | {m['title']}{mark}")
+            vol = extract_volume_ml(m["title"])
+            vol_text = f"{vol} ml" if vol else "-"
+            print(f"  {m['merchant']:<14} {m['price']:>10.2f} {m['currency']} | GTIN {gtin} | HACİM {vol_text} | {m['title']}{mark}")
         if len(members) > 1:
             highest = max(m["price"] for m in members)
             print(f"  Fiyat farkı: {highest - cheapest['price']:.2f} TRY")
