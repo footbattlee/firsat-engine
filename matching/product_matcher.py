@@ -2,7 +2,6 @@ import json
 import os
 import re
 import unicodedata
-from collections import defaultdict
 from difflib import SequenceMatcher
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -43,6 +42,11 @@ COLOR_FAMILIES = {
     "gold": "gold", "altin": "gold", "gumus": "silver", "silver": "silver",
 }
 
+VOLUME_CONTEXT_WORDS = {
+    "termos", "matara", "bardak", "mug", "kupa", "bottle", "suluk", "tumbler",
+    "iceflow", "aerolight", "fliptop", "quencher",
+}
+
 
 def sb_get(table, params=None):
     if not SUPABASE_SERVICE_ROLE_KEY:
@@ -50,11 +54,10 @@ def sb_get(table, params=None):
     url = f"{SUPABASE_URL}/rest/v1/{table}"
     if params:
         url += "?" + urlencode(params, doseq=True, safe="(),.*:-")
-    headers = {
+    req = Request(url, headers={
         "apikey": SUPABASE_SERVICE_ROLE_KEY,
         "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-    }
-    req = Request(url, headers=headers, method="GET")
+    }, method="GET")
     with urlopen(req, timeout=45) as resp:
         raw = resp.read().decode()
         return json.loads(raw) if raw else []
@@ -87,61 +90,82 @@ def meaningful_tokens(value):
     return out
 
 
+def _decimal_to_float(raw):
+    raw = raw.replace(",", ".")
+    if raw.startswith("."):
+        raw = "0" + raw
+    return float(raw)
+
+
 def extract_volume_ml(title):
     raw = (title or "").casefold()
 
     # 500 ml / 500ml
-    matches = re.findall(r"(?<!\d)(\d{2,4}(?:[\.,]\d+)?)\s*ml\b", raw)
-    if matches:
+    m = re.search(r"(?<![\d.,])(\d{2,4}(?:[\.,]\d+)?)\s*ml\b", raw)
+    if m:
         try:
-            return int(round(float(matches[0].replace(",", "."))))
+            return int(round(_decimal_to_float(m.group(1))))
         except ValueError:
             pass
 
-    # 0.47 L / 0,89 LT / 1.1 litre
-    m = re.search(r"(?<!\d)(\d+(?:[\.,]\d+)?)\s*l(?:t|itre|iter)?\b", raw)
+    # 0.47L / .35L / 0,89 LT / 1.1 litre
+    m = re.search(r"(?<![\d.,])((?:\d+[\.,]\d+)|(?:[\.,]\d+)|\d+)\s*l(?:t|itre|iter)?\b", raw)
     if m:
         try:
-            return int(round(float(m.group(1).replace(",", ".")) * 1000))
+            liters = _decimal_to_float(m.group(1))
+            if 0 < liters <= 20:
+                return int(round(liters * 1000))
         except ValueError:
             pass
 
     # 12 oz / 16oz
-    m = re.search(r"(?<!\d)(\d+(?:[\.,]\d+)?)\s*oz\b", raw)
+    m = re.search(r"(?<![\d.,])((?:\d+[\.,]\d+)|\d+)\s*oz\b", raw)
     if m:
         try:
-            return int(round(float(m.group(1).replace(",", ".")) * 29.5735))
+            return int(round(_decimal_to_float(m.group(1)) * 29.5735))
         except ValueError:
             pass
+
+    # Bazı mağazalar başlıkta birimi atıyor: "Termos Bardak 0,89" / "Mug 0.47".
+    # Bunu yalnızca termos/matara bağlamında uygula; diğer kategorilerde rastgele ondalıkları hacim sayma.
+    norm_tokens = set(tokens(title))
+    if norm_tokens.intersection(VOLUME_CONTEXT_WORDS):
+        candidates = re.findall(r"(?<![\d.,])((?:\d+[\.,]\d+)|(?:[\.,]\d+))(?![\d.,])", raw)
+        for candidate in candidates:
+            try:
+                liters = _decimal_to_float(candidate)
+            except ValueError:
+                continue
+            if 0.10 <= liters <= 5.0:
+                return int(round(liters * 1000))
 
     return None
 
 
 def extract_colors(title):
-    ts = set(tokens(title)).intersection(COLORS)
-    return {COLOR_FAMILIES.get(x, x) for x in ts}
+    found = set(tokens(title)).intersection(COLORS)
+    return {COLOR_FAMILIES.get(x, x) for x in found}
 
 
 def extract_model_tokens(title):
-    """Üretici/model koduna benzeyen kuvvetli tokenları çıkarır.
-
-    Örn: 10-13062-013, ST-206, CKR2127, PNG-1200P, 10787-217.
-    Sadece hacim/sayı ifadelerini model saymamak için en az bir harf veya tire ister.
-    """
     raw = unicodedata.normalize("NFKD", (title or "").upper())
     raw = "".join(ch for ch in raw if not unicodedata.combining(ch))
-    raw = raw.replace("İ", "I")
 
     candidates = re.findall(r"\b[A-Z0-9]+(?:-[A-Z0-9]+)+\b|\b[A-Z]{1,8}\d{2,}[A-Z0-9]*\b", raw)
     result = set()
+    color_words = {x.upper() for x in COLORS}
+
     for token in candidates:
+        parts = [p for p in token.split("-") if p]
+        # MOR-TURUNCU gibi yalnız renklerden oluşan ifadeleri model sanma.
+        if parts and all(p in color_words for p in parts):
+            continue
+
         compact = re.sub(r"[^A-Z0-9]", "", token)
         if len(compact) < 4:
             continue
-        if not any(c.isalpha() for c in compact):
-            # 10-13062-013 gibi Stanley kodları tamamen rakam+tire olabilir.
-            if token.count("-") < 2:
-                continue
+        if not any(c.isalpha() for c in compact) and token.count("-") < 2:
+            continue
         result.add(token)
     return result
 
@@ -177,21 +201,10 @@ def title_similarity(a, b):
 
 
 def model_overlap(a, b):
-    explicit_a, explicit_b = extract_model_tokens(a), extract_model_tokens(b)
-    if explicit_a and explicit_b:
-        return len(explicit_a & explicit_b) / min(len(explicit_a), len(explicit_b))
-
-    def model_tokens(title):
-        result = set()
-        for t in meaningful_tokens(title):
-            if any(ch.isdigit() for ch in t) or len(t) >= 5:
-                result.add(t)
-        return result
-
-    ma, mb = model_tokens(a), model_tokens(b)
-    if not ma or not mb:
-        return 0.0
-    return len(ma & mb) / min(len(ma), len(mb))
+    ma, mb = extract_model_tokens(a), extract_model_tokens(b)
+    if ma and mb:
+        return len(ma & mb) / min(len(ma), len(mb))
+    return 0.0
 
 
 def pair_score(a, b):
@@ -228,9 +241,7 @@ def pair_score(a, b):
     sim = title_similarity(a["title"], b["title"])
     model = model_overlap(a["title"], b["title"])
 
-    score = 48.0
-    score += sim * 34.0
-    score += model * 12.0
+    score = 48.0 + (sim * 34.0) + (model * 12.0)
     if vol_a is not None and vol_b is not None and abs(vol_a - vol_b) <= VOLUME_TOLERANCE_ML:
         score += 6.0
     if models_a and models_b and not models_a.isdisjoint(models_b):
@@ -243,7 +254,10 @@ def load_rows():
     merchants = sb_get("merchants", {"select": "id,name,slug"})
     products = sb_get("products", {"select": "id,brand,title,slug,active"})
     variants = sb_get("product_variants", {"select": "id,product_id,gtin,sku,active"})
-    offers = sb_get("offers", {"select": "id,product_variant_id,merchant_id,merchant_product_id,price,currency,in_stock,product_url", "in_stock": "eq.true"})
+    offers = sb_get("offers", {
+        "select": "id,product_variant_id,merchant_id,merchant_product_id,price,currency,in_stock,product_url",
+        "in_stock": "eq.true",
+    })
 
     merchant_map = {x["id"]: x for x in merchants}
     product_map = {x["id"]: x for x in products}
@@ -277,13 +291,6 @@ def load_rows():
 
 
 def build_groups(rows):
-    """Tam-bağlantı (complete-linkage) ile güvenli canonical gruplar oluşturur.
-
-    Eski connected-component yaklaşımında A~B ve B~C eşleşmesi A ile C uyumsuz olsa
-    bile üçünü aynı gruba taşıyabiliyordu. Burada iki grup ancak gruplar arasındaki
-    TÜM çapraz çiftler MIN_SCORE üstündeyse birleşir. Böylece hacim/renk/model farkı
-    transitive bridge üzerinden gruba sızamaz.
-    """
     pair_cache = {}
     accepted_edges = []
 
@@ -302,33 +309,19 @@ def build_groups(rows):
         key = (i, j) if i < j else (j, i)
         return pair_cache.get(key, (0.0, "missing"))
 
-    for score, reason, i, j in accepted_edges:
-        gi = group_of[i]
-        gj = group_of[j]
+    for _, _, i, j in accepted_edges:
+        gi, gj = group_of[i], group_of[j]
         if gi == gj:
             continue
-
-        left = groups[gi]
-        right = groups[gj]
+        left, right = groups[gi], groups[gj]
         if not left or not right:
             continue
 
-        # Aynı mağazadan iki farklı listing'i tek canonical varyanta sokma.
         merchant_ids = [rows[x]["merchant_id"] for x in (left | right)]
         if len(merchant_ids) != len(set(merchant_ids)):
             continue
 
-        compatible = True
-        for a in left:
-            for b in right:
-                cross_score, _ = cached_pair(a, b)
-                if cross_score < MIN_SCORE:
-                    compatible = False
-                    break
-            if not compatible:
-                break
-
-        if not compatible:
+        if any(cached_pair(a, b)[0] < MIN_SCORE for a in left for b in right):
             continue
 
         merged = left | right
@@ -342,18 +335,15 @@ def build_groups(rows):
         if len(indexes_set) < 2:
             continue
         indexes = sorted(indexes_set)
-        if len({rows[i]["merchant_id"] for i in indexes}) < 2:
-            continue
-
         edges = []
         for pos, i in enumerate(indexes):
             for j in indexes[pos + 1:]:
                 score, reason = cached_pair(i, j)
                 if score >= MIN_SCORE:
                     edges.append((score, reason, i, j))
-
-        best_score = max((e[0] for e in edges), default=0.0)
-        result.append((best_score, indexes, edges))
+        if not edges:
+            continue
+        result.append((max(e[0] for e in edges), indexes, edges))
 
     result.sort(key=lambda x: (-x[0], -len(x[1])))
     return result
@@ -382,7 +372,7 @@ def print_groups(rows, groups):
             mark = "  <-- EN UCUZ" if m is cheapest else ""
             gtin = valid_gtin(m.get("gtin")) or "-"
             vol = extract_volume_ml(m["title"])
-            vol_text = f"{vol} ml" if vol else "-"
+            vol_text = f"{vol} ml" if vol is not None else "-"
             models = ",".join(sorted(extract_model_tokens(m["title"]))) or "-"
             colors = ",".join(sorted(extract_colors(m["title"]))) or "-"
             print(
@@ -392,10 +382,8 @@ def print_groups(rows, groups):
         if len(members) > 1:
             highest = max(m["price"] for m in members)
             print(f"  Fiyat farkı: {highest - cheapest['price']:.2f} TRY")
-
         if edges:
-            reasons = sorted({reason for _, reason, _, _ in edges})
-            print("  Match reason:", ", ".join(reasons))
+            print("  Match reason:", ", ".join(sorted({reason for _, reason, _, _ in edges})))
 
     if len(groups) > MAX_GROUPS:
         print(f"\n... {len(groups) - MAX_GROUPS} grup daha var. MATCH_MAX_GROUPS ile artırabilirsin.")
