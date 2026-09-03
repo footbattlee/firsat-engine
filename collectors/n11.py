@@ -108,7 +108,29 @@ def brand_name(product):
     return str(brand).strip() if brand else None
 
 
-def image_url(product):
+def image_url(product, html=None):
+    # n11 JSON-LD bazen ürünle ilgisiz/ortak bir görsel döndürebiliyor.
+    # Önce sayfanın kendi sosyal paylaşım görselini kullan; bu genelde gerçek ürün görselidir.
+    if html:
+        soup = BeautifulSoup(html, "html.parser")
+
+        meta_candidates = [
+            soup.select_one('meta[property="og:image"]'),
+            soup.select_one('meta[property="og:image:secure_url"]'),
+            soup.select_one('meta[name="twitter:image"]'),
+        ]
+        for meta in meta_candidates:
+            if meta and meta.get("content"):
+                value = meta.get("content").strip()
+                if value.startswith("http"):
+                    return value
+
+        image_src = soup.select_one('link[rel="image_src"]')
+        if image_src and image_src.get("href"):
+            value = image_src.get("href").strip()
+            if value.startswith("http"):
+                return value
+
     image = product.get("image")
     if isinstance(image, list):
         image = image[0] if image else None
@@ -148,7 +170,7 @@ def parse_product_page(product_url, html):
         "brand": brand_name(product),
         "title": title,
         "price": price,
-        "image_url": image_url(product),
+        "image_url": image_url(product, html),
         "product_url": canonical_url(product_url),
         "in_stock": "outofstock" not in availability,
         "gtin": clean_gtin(product),
@@ -210,8 +232,48 @@ def get_or_create_merchant():
 
 
 def find_offer(merchant_id, mpid):
-    rows = sb("GET", "offers", {"merchant_id": f"eq.{merchant_id}", "merchant_product_id": f"eq.{mpid}", "select": "id", "limit": "1"})
+    rows = sb(
+        "GET",
+        "offers",
+        {
+            "merchant_id": f"eq.{merchant_id}",
+            "merchant_product_id": f"eq.{mpid}",
+            "select": "id,product_variant_id",
+            "limit": "1",
+        },
+    )
     return rows[0] if rows else None
+
+
+def sync_existing_product_image(variant_id, image):
+    if not variant_id or not image:
+        return
+
+    rows = sb(
+        "GET",
+        "product_variants",
+        {"id": f"eq.{variant_id}", "select": "id,product_id", "limit": "1"},
+    )
+    if not rows:
+        return
+
+    product_id = rows[0].get("product_id")
+    sb(
+        "PATCH",
+        "product_variants",
+        {"id": f"eq.{variant_id}"},
+        {"image_url": image},
+        "return=minimal",
+    )
+
+    if product_id:
+        sb(
+            "PATCH",
+            "products",
+            {"id": f"eq.{product_id}"},
+            {"image_url": image},
+            "return=minimal",
+        )
 
 
 def create_variant(item):
@@ -231,6 +293,7 @@ def save_products_to_supabase(products):
         if offer:
             offer_id = offer["id"]
             sb("PATCH", "offers", {"id": f"eq.{offer_id}"}, {"price": item["price"], "product_url": item["product_url"], "image_url": item.get("image_url"), "currency": "TRY", "in_stock": item["in_stock"], "last_checked_at": checked_at, "updated_at": checked_at}, "return=minimal")
+            sync_existing_product_image(offer.get("product_variant_id"), item.get("image_url"))
         else:
             variant_id = create_variant(item)
             rows = sb("POST", "offers", body={"product_variant_id": variant_id, "merchant_id": merchant_id, "merchant_product_id": item["merchant_product_id"], "product_url": item["product_url"], "price": item["price"], "currency": "TRY", "in_stock": item["in_stock"], "image_url": item.get("image_url"), "last_checked_at": checked_at}, prefer="return=representation")
