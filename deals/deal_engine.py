@@ -1,13 +1,14 @@
 import json
 import os
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 DEAL_THRESHOLD_PERCENT = float(os.getenv("DEAL_THRESHOLD_PERCENT", "15"))
+HISTORY_DROP_THRESHOLD_PERCENT = float(os.getenv("HISTORY_DROP_THRESHOLD_PERCENT", "5"))
 
 
 def headers(extra=None):
@@ -26,7 +27,7 @@ def headers(extra=None):
 def sb_get(table, params=None):
     url = f"{SUPABASE_URL}/rest/v1/{table}"
     if params:
-        url += "?" + urlencode(params, doseq=True, safe="(),.*:-")
+        url += "?" + urlencode(params, doseq=True, safe="(),.*:-+")
     req = Request(url, headers=headers(), method="GET")
     with urlopen(req, timeout=45) as resp:
         raw = resp.read().decode()
@@ -47,7 +48,7 @@ def sb_upsert(table, row, on_conflict):
 
 
 def sb_patch(table, filters, values):
-    url = f"{SUPABASE_URL}/rest/v1/{table}?" + urlencode(filters, safe=".*:-")
+    url = f"{SUPABASE_URL}/rest/v1/{table}?" + urlencode(filters, safe=".*:-+")
     req = Request(
         url,
         data=json.dumps(values).encode(),
@@ -56,6 +57,15 @@ def sb_patch(table, filters, values):
     )
     with urlopen(req, timeout=45):
         return True
+
+
+def parse_dt(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def load_data():
@@ -71,7 +81,17 @@ def load_data():
     )
     merchants = sb_get("merchants", {"select": "id,name,slug"})
     existing = sb_get("deal_candidates", {"select": "id,canonical_product_id,status"})
-    return canonical, matches, variants, offers, merchants, existing
+
+    since_90d = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+    history = sb_get(
+        "price_history",
+        {
+            "select": "offer_id,price,checked_at",
+            "checked_at": f"gte.{since_90d}",
+            "order": "checked_at.desc",
+        },
+    )
+    return canonical, matches, variants, offers, merchants, existing, history
 
 
 def build_offer_groups(canonical, matches, variants, offers):
@@ -110,6 +130,20 @@ def build_offer_groups(canonical, matches, variants, offers):
     return grouped
 
 
+def build_history_map(history):
+    out = defaultdict(list)
+    for row in history:
+        price = float(row.get("price") or 0)
+        checked_at = parse_dt(row.get("checked_at"))
+        if price <= 0 or not checked_at:
+            continue
+        out[row["offer_id"]].append({"price": price, "checked_at": checked_at})
+
+    for rows in out.values():
+        rows.sort(key=lambda x: x["checked_at"], reverse=True)
+    return out
+
+
 def best_offer_per_merchant(offers):
     by_merchant = {}
     for offer in offers:
@@ -126,21 +160,86 @@ def percent_cheaper(cheapest, competitor):
     return ((competitor - cheapest) / competitor) * 100.0
 
 
+def price_drop_percent(current, reference):
+    if not reference or reference <= 0 or current >= reference:
+        return 0.0
+    return ((reference - current) / reference) * 100.0
+
+
+def analyze_history(offer_id, current_price, history_map):
+    now = datetime.now(timezone.utc)
+    rows_90 = history_map.get(offer_id, [])
+    rows_30 = [x for x in rows_90 if x["checked_at"] >= now - timedelta(days=30)]
+
+    points = len(rows_90)
+    avg_30 = sum(x["price"] for x in rows_30) / len(rows_30) if rows_30 else None
+    low_90 = min((x["price"] for x in rows_90), default=None)
+
+    previous_distinct = None
+    for row in rows_90:
+        if abs(row["price"] - current_price) > 0.01:
+            previous_distinct = row["price"]
+            break
+
+    prev_drop = price_drop_percent(current_price, previous_distinct)
+    avg_drop = price_drop_percent(current_price, avg_30)
+    strongest_drop = max(prev_drop, avg_drop)
+
+    if points < 2:
+        status = "insufficient_history"
+        verified = False
+    elif strongest_drop + 1e-9 >= HISTORY_DROP_THRESHOLD_PERCENT:
+        status = "price_drop"
+        verified = True
+    elif previous_distinct is None:
+        status = "no_observed_drop"
+        verified = False
+    else:
+        status = "no_significant_drop"
+        verified = False
+
+    return {
+        "history_status": status,
+        "history_points": points,
+        "history_avg_30d": round(avg_30, 2) if avg_30 is not None else None,
+        "history_low_90d": round(low_90, 2) if low_90 is not None else None,
+        "previous_distinct_price": round(previous_distinct, 2) if previous_distinct is not None else None,
+        "history_drop_percent": round(strongest_drop, 2),
+        "history_threshold_percent": HISTORY_DROP_THRESHOLD_PERCENT,
+        "verified": verified,
+    }
+
+
+def history_label(info):
+    status = info["history_status"]
+    if status == "price_drop":
+        return f"DOĞRULANDI (%{info['history_drop_percent']:.2f} geçmiş fiyat düşüşü)"
+    if status == "insufficient_history":
+        return f"YETERSİZ VERİ ({info['history_points']} geçmiş kayıt)"
+    if status == "no_observed_drop":
+        return "FİYAT DÜŞÜŞÜ HENÜZ GÖRÜLMEDİ"
+    return f"ANLAMLI DÜŞÜŞ YOK (%{info['history_drop_percent']:.2f})"
+
+
 def main():
-    canonical, matches, variants, offers, merchants, existing = load_data()
+    canonical, matches, variants, offers, merchants, existing, history = load_data()
     merchant_map = {m["id"]: (m.get("name") or m.get("slug") or m["id"]) for m in merchants}
     canonical_map = {c["id"]: c for c in canonical}
     existing_by_canonical = {x["canonical_product_id"]: x for x in existing}
     grouped = build_offer_groups(canonical, matches, variants, offers)
+    history_map = build_history_map(history)
 
     print("=" * 88)
-    print("DEAL ENGINE - CROSS STORE")
+    print("DEAL ENGINE - CROSS STORE + PRICE HISTORY")
     print("=" * 88)
     print(f"Canonical ürün: {len(canonical)}")
-    print(f"Fırsat eşiği: %{DEAL_THRESHOLD_PERCENT:.2f}")
-    print("Kural: en ucuz teklif, ikinci en ucuz farklı mağazadan en az %15 ucuzsa fırsat adayıdır.\n")
+    print(f"Rakip fiyat eşiği: %{DEAL_THRESHOLD_PERCENT:.2f}")
+    print(f"Geçmiş fiyat düşüş eşiği: %{HISTORY_DROP_THRESHOLD_PERCENT:.2f}")
+    print("Kural 1: en ucuz teklif, ikinci en ucuz farklı mağazadan en az %15 ucuzsa fırsat adayıdır.")
+    print("Kural 2: geçmiş fiyatında en az %5 düşüş görülürse fırsat doğrulanır.\n")
 
     candidates = 0
+    verified_count = 0
     not_candidates = 0
     insufficient = 0
     now = datetime.now(timezone.utc).isoformat()
@@ -153,7 +252,7 @@ def main():
             insufficient += 1
             print(f"SKIP | {title} | en az 2 farklı mağaza teklifi yok")
             if cid in existing_by_canonical and existing_by_canonical[cid].get("status") == "candidate":
-                sb_patch("deal_candidates", {"canonical_product_id": f"eq.{cid}"}, {"status": "expired", "updated_at": now})
+                sb_patch("deal_candidates", {"canonical_product_id": f"eq.{cid}"}, {"status": "expired", "verified": False, "verified_at": None, "updated_at": now})
             continue
 
         cheapest = store_offers[0]
@@ -164,6 +263,8 @@ def main():
         competitor_name = merchant_map.get(competitor["merchant_id"], competitor["merchant_id"])
 
         if gap + 1e-9 >= DEAL_THRESHOLD_PERCENT:
+            history_info = analyze_history(cheapest["id"], cheapest["price"], history_map)
+            verified_at = now if history_info["verified"] else None
             row = {
                 "canonical_product_id": cid,
                 "cheapest_offer_id": cheapest["id"],
@@ -176,14 +277,26 @@ def main():
                 "threshold_percent": DEAL_THRESHOLD_PERCENT,
                 "status": "candidate",
                 "updated_at": now,
+                "verified_at": verified_at,
+                **history_info,
             }
             if cid not in existing_by_canonical:
                 row["detected_at"] = now
             sb_upsert("deal_candidates", row, "canonical_product_id")
+
             candidates += 1
-            print(f"FIRSAT | %{gap:.2f} ucuz | {title}")
+            if history_info["verified"]:
+                verified_count += 1
+                prefix = "DOĞRULANMIŞ FIRSAT"
+            else:
+                prefix = "FIRSAT ADAYI"
+
+            print(f"{prefix} | rakipten %{gap:.2f} ucuz | {title}")
             print(f"  {cheapest_name:<16} {cheapest['price']:>10.2f} TRY  <-- EN UCUZ")
             print(f"  {competitor_name:<16} {competitor['price']:>10.2f} TRY  <-- RAKİP")
+            print(f"  Geçmiş kontrolü: {history_label(history_info)}")
+            if history_info["history_avg_30d"] is not None:
+                print(f"  30 gün ort.: {history_info['history_avg_30d']:.2f} TRY | 90 gün dip: {history_info['history_low_90d']:.2f} TRY")
         else:
             not_candidates += 1
             print(f"NORMAL | %{gap:.2f} ucuz | {title}")
@@ -203,12 +316,15 @@ def main():
                         "gap_percent": round(gap, 2),
                         "threshold_percent": DEAL_THRESHOLD_PERCENT,
                         "status": "expired",
+                        "verified": False,
+                        "verified_at": None,
                         "updated_at": now,
                     },
                 )
 
     print("\n" + "=" * 88)
     print(f"Fırsat adayı: {candidates}")
+    print(f"Geçmiş fiyatla doğrulanan: {verified_count}")
     print(f"Eşik altı: {not_candidates}")
     print(f"Yetersiz mağaza: {insufficient}")
     print("=" * 88)
