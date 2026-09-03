@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "categories": [
+    {
+      "name": "Termos / Matara",
+      "slug": "termos-matara",
+      "active": true,
+      "subcategories": [
+        {
+          "name": "Termos",
+          "slug": "termos",
+          "active": true,
+          "queries": ["termos"]
+        },
+        {
+          "name": "Matara",
+          "slug": "matara",
+          "active": true,
+          "queries": ["matara"]
+        },
+        {
+          "name": "Termos Bardak",
+          "slug": "termos-bardak",
+          "active": true,
+          "queries": ["termos bardak", "termos kupa"]
+        },
+        {
+          "name": "Çocuk Matarası",
+          "slug": "cocuk-matarasi",
+          "active": true,
+          "queries": ["çocuk matarası", "çocuk matara"]
+        }
+      ]
+    },
+    {
+      "name": "Anne & Çocuk",
+      "slug": "anne-cocuk",
+      "active": true,
+      "subcategories": [
+        {
+          "name": "Bebek Bezi",
+          "slug": "bebek-bezi",
+          "active": true,
+          "queries": ["bebek bezi"]
+        },
+        {
+          "name": "Islak Mendil",
+          "slug": "islak-mendil",
+          "active": true,
+          "queries": ["ıslak mendil", "bebek ıslak mendil"]
+        },
+        {
+          "name": "Biberon",
+          "slug": "biberon",
+          "active": true,
+          "queries": ["biberon"]
+        },
+        {
+          "name": "Emzik",
+          "slug": "emzik",
+          "active": true,
+          "queries": ["emzik"]
+        },
+        {
+          "name": "Mama Sandalyesi",
+          "slug": "mama-sandalyesi",
+          "active": true,
+          "queries": ["mama sandalyesi"]
+        },
+        {
+          "name": "Bebek Bakım Ürünleri",
+          "slug": "bebek-bakim-urunleri",
+          "active": true,
+          "queries": ["bebek bakım ürünleri", "bebek bakım seti"]
+        }
+      ]
+    },
+    {
+      "name": "Makyaj",
+      "slug": "makyaj",
+      "active": true,
+      "subcategories": [
+        {
+          "name": "Fondöten",
+          "slug": "fondoten",
+          "active": true,
+          "queries": ["fondöten"]
+        },
+        {
+          "name": "Maskara",
+          "slug": "maskara",
+          "active": true,
+          "queries": ["maskara", "rimel"]
+        },
+        {
+          "name": "Ruj",
+          "slug": "ruj",
+          "active": true,
+          "queries": ["ruj"]
+        },
+        {
+          "name": "Kapatıcı",
+          "slug": "kapatici",
+          "active": true,
+          "queries": ["kapatıcı", "concealer"]
+        },
+        {
+          "name": "Allık",
+          "slug": "allik",
+          "active": true,
+          "queries": ["allık"]
+        },
+        {
+          "name": "Far Paleti",
+          "slug": "far-paleti",
+          "active": true,
+          "queries": ["far paleti", "göz farı paleti"]
+        }
+      ]
+    },
+    {
+      "name": "Ev & Yaşam",
+      "slug": "ev-yasam",
+      "active": true,
+      "subcategories": [
+        {
+          "name": "Saklama Kabı",
+          "slug": "saklama-kabi",
+          "active": true,
+          "queries": ["saklama kabı", "gıda saklama kabı"]
+        },
+        {
+          "name": "Tava / Tencere",
+          "slug": "tava-tencere",
+          "active": true,
+          "queries": ["tava", "tencere", "tencere seti"]
+        },
+        {
+          "name": "Nevresim",
+          "slug": "nevresim",
+          "active": true,
+          "queries": ["nevresim", "nevresim takımı"]
+        },
+        {
+          "name": "Havlu",
+          "slug": "havlu",
+          "active": true,
+          "queries": ["havlu", "banyo havlusu"]
+        },
+        {
+          "name": "Küçük Ev Aletleri",
+          "slug": "kucuk-ev-aletleri",
+          "active": true,
+          "queries": ["küçük ev aletleri", "blender", "kahve makinesi", "su ısıtıcı"]
+        },
+        {
+          "name": "Temizlik Ürünleri",
+          "slug": "temizlik-urunleri",
+          "active": true,
+          "queries": ["temizlik ürünleri", "çamaşır deterjanı", "bulaşık deterjanı", "yüzey temizleyici"]
+        }
+      ]
+    }
+  ]
+}
