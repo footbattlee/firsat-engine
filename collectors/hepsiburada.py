@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import quote_plus, urlencode, urljoin, urlparse
+from urllib.parse import quote_plus, urlencode, urljoin
 from urllib.request import Request, urlopen
 
 from playwright.async_api import async_playwright
@@ -22,10 +22,31 @@ SUPABASE_URL = os.getenv(
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 
 CARD_SELECTORS = [
+    "li[class^='productListContent-']",
     "[data-test-id='product-card']",
     "[data-testid='product-card']",
     "li[class*='productListContent']",
     "div[class*='productListContent'] > div",
+]
+
+TITLE_SELECTORS = [
+    "h2[class^='title-module_titleRoot'] span",
+    "[data-test-id='product-card-name']",
+    "[data-testid='product-card-name']",
+    "h3",
+    "h2",
+    "[class*='title']",
+    "[class*='name']",
+]
+
+PRICE_SELECTORS = [
+    "div[class^='price-module_finalPrice']",
+    "[data-test-id='price-current-price']",
+    "[data-testid='price-current-price']",
+    "[data-test-id*='price']",
+    "[data-testid*='price']",
+    "[class*='finalPrice']",
+    "[class*='sellingPrice']",
 ]
 
 PRICE_PATTERN = re.compile(
@@ -104,6 +125,14 @@ async def attr_first(card, selectors, attr):
 
 
 async def get_product_href(card):
+    selectors = [
+        "a[href*='-p-HBC']",
+        "a[href*='/p-HBC']",
+        "a[href*='HBCV']",
+        "a[href*='HBC000']",
+        "a[href]",
+    ]
+
     try:
         if await card.evaluate("el => el.tagName.toLowerCase()") == "a":
             href = await card.get_attribute("href")
@@ -112,13 +141,6 @@ async def get_product_href(card):
     except Exception:
         pass
 
-    selectors = [
-        "a[href*='-p-HBC']",
-        "a[href*='/p-HBC']",
-        "a[href*='HBCV']",
-        "a[href*='HBC000']",
-        "a[href]",
-    ]
     for selector in selectors:
         try:
             loc = card.locator(selector).first
@@ -132,56 +154,10 @@ async def get_product_href(card):
 
 
 async def extract_current_price(card):
-    try:
-        candidates = await card.evaluate(
-            r"""
-            card => {
-              const nodes = [...card.querySelectorAll(
-                "[data-test-id*='price'], [data-testid*='price'], " +
-                "[class*='price'], [class*='Price'], [class*='selling'], [class*='discounted']"
-              )];
-
-              const promoWords = ['indirim','kupon','puan','cashback','kazanç','kazanc','sepette'];
-              const goodWords = ['current','selling','discounted','sale','final','price'];
-              const badWords = ['old','original','list','strike','crossed','campaign','coupon','benefit'];
-              const moneyRe = /(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(?:TL|₺)/i;
-
-              const result = [];
-              for (let i = 0; i < nodes.length; i++) {
-                const el = nodes[i];
-                const style = window.getComputedStyle(el);
-                if (style.display === 'none' || style.visibility === 'hidden') continue;
-
-                const text = (el.innerText || el.textContent || '').trim();
-                if (!moneyRe.test(text)) continue;
-
-                const cls = String(el.className || '').toLowerCase();
-                const testid = String(el.getAttribute('data-test-id') || el.getAttribute('data-testid') || '').toLowerCase();
-                const meta = cls + ' ' + testid;
-                const own = text.toLowerCase();
-
-                let score = 0;
-                if (goodWords.some(w => meta.includes(w))) score += 80;
-                if (badWords.some(w => meta.includes(w))) score -= 140;
-                if (promoWords.some(w => own.includes(w))) score -= 180;
-                if (el.children.length === 0) score += 20;
-                if ((text.match(/TL|₺/gi) || []).length === 1) score += 15;
-
-                result.push({ text, score, order: i });
-              }
-
-              result.sort((a, b) => (b.score - a.score) || (a.order - b.order));
-              return result.slice(0, 20);
-            }
-            """
-        )
-    except Exception:
-        candidates = []
-
-    for candidate in candidates:
-        value = parse_first_price(candidate.get("text"))
-        if value is not None and candidate.get("score", 0) >= 0:
-            return value
+    direct = await text_first(card, PRICE_SELECTORS)
+    value = parse_first_price(direct)
+    if value is not None:
+        return value
 
     try:
         card_text = (await card.inner_text()).strip()
@@ -210,6 +186,7 @@ def merchant_product_id_from_url(product_url: str):
         r"-p-([A-Z0-9]+)(?:$|[/?#])",
         r"/(HBCV[A-Z0-9]+)(?:$|[/?#])",
         r"/(HBC[A-Z0-9]+)(?:$|[/?#])",
+        r"(HB[A-Z0-9]{6,})",
     ]
     for pattern in patterns:
         match = re.search(pattern, product_url, flags=re.I)
@@ -404,14 +381,7 @@ async def extract_card(card):
 
     product_url = urljoin(BASE_URL, href.split("?")[0])
 
-    title = await text_first(card, [
-        "[data-test-id='product-card-name']",
-        "[data-testid='product-card-name']",
-        "h3",
-        "h2",
-        "[class*='title']",
-        "[class*='name']",
-    ])
+    title = await text_first(card, TITLE_SELECTORS)
     if not title:
         title = await attr_first(card, ["img"], "alt")
 
@@ -442,14 +412,13 @@ async def extract_card(card):
 
 
 async def collect_from_product_links(page):
-    """Kart selectorleri değişirse HBC ürün linklerinden kartı bulmaya çalışır."""
-    links = page.locator("a[href*='-p-HBC'], a[href*='HBCV'], a[href*='HBC000']")
+    links = page.locator("a[href*='-p-HBC'], a[href*='HBCV'], a[href*='HBC000'], a[href*='HB']")
     total = await links.count()
     print(f"Fallback product links: {total}")
 
     products = []
     seen = set()
-    for i in range(min(total, 120)):
+    for i in range(min(total, 150)):
         link = links.nth(i)
         href = await link.get_attribute("href")
         if not href:
@@ -483,19 +452,24 @@ async def main():
         context = await browser.new_context(
             locale="tr-TR",
             viewport={"width": 1365, "height": 900},
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/140.0.0.0 Safari/537.36"
-            ),
         )
         page = await context.new_page()
 
         print(f"Opening: {url}")
         response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        print("HTTP status:", response.status if response else None)
+        status = response.status if response else None
+        print("HTTP status:", status)
+        print("Page title:", await page.title())
 
         await page.wait_for_timeout(5000)
+        body_text = (await page.locator("body").inner_text())[:1800]
+        body_lower = body_text.casefold()
+        if status == 403 or "güvenlik" in body_lower or "robot olmadığınızı" in body_lower or "captcha" in body_lower:
+            print("Hepsiburada güvenlik doğrulaması tespit edildi; collector durduruldu.")
+            print("Body preview:", body_text)
+            await browser.close()
+            raise SystemExit(3)
+
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3)")
         await page.wait_for_timeout(2500)
 
@@ -515,7 +489,7 @@ async def main():
         seen = set()
 
         if card_locator is not None:
-            count = min(await card_locator.count(), 100)
+            count = min(await card_locator.count(), 120)
             for i in range(count):
                 item = await extract_card(card_locator.nth(i))
                 if not item or not item.get("product_url") or item["product_url"] in seen:
@@ -544,12 +518,8 @@ async def main():
 
         if products:
             save_products_to_supabase(products)
-
-        if not products:
-            title = await page.title()
-            body_text = (await page.locator("body").inner_text())[:1500]
+        else:
             print("No Hepsiburada products found.")
-            print("Page title:", title)
             print("Body preview:", body_text)
             await browser.close()
             raise SystemExit(3)
