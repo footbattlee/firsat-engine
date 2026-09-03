@@ -1,3 +1,4 @@
+import html as html_lib
 import json
 import os
 import re
@@ -37,56 +38,52 @@ def normalize_text(value):
     return re.sub(r"\s+", " ", value).strip()
 
 
+def title_matches_query(title, query):
+    title_tokens = set(normalize_text(title).split())
+    query_tokens = [t for t in normalize_text(query).split() if len(t) >= 3]
+    return not query_tokens or any(token in title_tokens for token in query_tokens)
+
+
 def walk_json(value):
     if isinstance(value, dict):
         yield value
-        for child in value.values():
-            yield from walk_json(child)
+        for child in value.values(): yield from walk_json(child)
     elif isinstance(value, list):
-        for child in value:
-            yield from walk_json(child)
+        for child in value: yield from walk_json(child)
 
 
 def product_json_ld(html):
     soup = BeautifulSoup(html, "html.parser")
     for script in soup.select('script[type="application/ld+json"]'):
         raw = script.string or script.get_text(strip=True)
-        if not raw:
-            continue
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            continue
+        if not raw: continue
+        try: parsed = json.loads(raw)
+        except Exception: continue
         for item in walk_json(parsed):
             typ = item.get("@type")
-            if typ == "Product" or (isinstance(typ, list) and "Product" in typ):
-                return item
+            if typ == "Product" or (isinstance(typ, list) and "Product" in typ): return item
     return None
 
 
-def extract_product_urls(html, limit):
+def extract_product_urls(html, max_candidates):
     soup = BeautifulSoup(html, "html.parser")
     out, seen = [], set()
     for a in soup.select("a[href]"):
         url = canonical_url(urljoin(BASE_URL, a.get("href", "")))
         p = urlparse(url)
-        if p.netloc not in {"www.vatanbilgisayar.com", "vatanbilgisayar.com"}:
-            continue
+        if p.netloc not in {"www.vatanbilgisayar.com", "vatanbilgisayar.com"}: continue
         path = p.path.lower()
-        if not path.endswith(".html") or any(x in path for x in ("/kategori/", "/marka/", "/arama/")):
-            continue
-        if url in seen:
-            continue
+        if not path.endswith(".html") or any(x in path for x in ("/kategori/", "/marka/", "/arama/")): continue
+        if url in seen: continue
         seen.add(url); out.append(url)
-        if len(out) >= limit: break
+        if len(out) >= max_candidates: break
     return out
 
 
 def first_offer(offers):
     if isinstance(offers, list):
         for offer in offers:
-            if isinstance(offer, dict) and (offer.get("price") is not None or offer.get("lowPrice") is not None):
-                return offer
+            if isinstance(offer, dict) and (offer.get("price") is not None or offer.get("lowPrice") is not None): return offer
         return offers[0] if offers and isinstance(offers[0], dict) else {}
     return offers if isinstance(offers, dict) else {}
 
@@ -102,7 +99,7 @@ def to_float(value):
 def brand_name(product):
     brand = product.get("brand")
     if isinstance(brand, dict): brand = brand.get("name")
-    return str(brand).strip() if brand else None
+    return html_lib.unescape(str(brand).strip()) if brand else None
 
 
 def image_url(product):
@@ -126,7 +123,7 @@ def parse_product_page(product_url, html):
     if not product: return None
     offer = first_offer(product.get("offers"))
     price = to_float(offer.get("price") or offer.get("lowPrice"))
-    title = str(product.get("name") or "").strip()
+    title = html_lib.unescape(str(product.get("name") or "").strip())
     sku = str(product.get("sku") or product.get("productID") or product.get("mpn") or "").strip()
     if not title or price is None or not sku: return None
     availability = str(offer.get("availability") or "").casefold()
@@ -141,21 +138,23 @@ def collect(query=DEFAULT_QUERY, limit=LIMIT):
     session = requests.Session(); session.headers.update(REQUEST_HEADERS)
     search_url = SEARCH_URL.format(query=quote_plus(query).replace("+", "%20"))
     print("Opening search:", search_url)
-    r = fetch(session, search_url)
-    print("Search HTTP:", r.status_code)
-    urls = extract_product_urls(r.text, limit)
-    print("Discovered products:", len(urls))
-    products=[]
+    r = fetch(session, search_url); print("Search HTTP:", r.status_code)
+    urls = extract_product_urls(r.text, max(limit * 10, 80)); print("Candidate product URLs:", len(urls))
+    products=[]; seen_skus=set()
     for i,url in enumerate(urls,1):
+        if len(products) >= limit: break
         try:
             time.sleep(REQUEST_DELAY_SECONDS)
             item=parse_product_page(url, fetch(session,url).text)
             if not item:
                 print(f"[{i}/{len(urls)}] SKIP: {url}"); continue
-            products.append(item)
+            if not title_matches_query(item["title"], query):
+                print(f"[{i}/{len(urls)}] IRRELEVANT: {item['title'][:80]}"); continue
+            if item["merchant_product_id"] in seen_skus:
+                print(f"[{i}/{len(urls)}] DUPLICATE SKU: {item['merchant_product_id']}"); continue
+            seen_skus.add(item["merchant_product_id"]); products.append(item)
             print(f"[{i}/{len(urls)}] OK | {item['merchant_product_id']} | {item['price']:.2f} TRY | {item['title'][:80]}")
-        except requests.RequestException as exc:
-            print(f"[{i}/{len(urls)}] HTTP ERROR: {exc}")
+        except requests.RequestException as exc: print(f"[{i}/{len(urls)}] HTTP ERROR: {exc}")
     return products
 
 
@@ -170,8 +169,7 @@ def sb(method, table, params=None, body=None, prefer=None):
     try:
         with urlopen(req,timeout=30) as resp:
             raw=resp.read().decode(); return json.loads(raw) if raw else None
-    except HTTPError as exc:
-        raise RuntimeError(f"Supabase HTTP {exc.code}: {exc.read().decode(errors='replace')}") from exc
+    except HTTPError as exc: raise RuntimeError(f"Supabase HTTP {exc.code}: {exc.read().decode(errors='replace')}") from exc
 
 
 def get_or_create_merchant():
