@@ -108,28 +108,51 @@ def brand_name(product):
     return str(brand).strip() if brand else None
 
 
-def image_url(product, html=None):
-    # n11 JSON-LD bazen ürünle ilgisiz/ortak bir görsel döndürebiliyor.
-    # Önce sayfanın kendi sosyal paylaşım görselini kullan; bu genelde gerçek ürün görselidir.
+def _img_value(img):
+    for attr in ("data-original", "data-src", "data-lazy", "data-image", "src"):
+        value = img.get(attr)
+        if value and isinstance(value, str):
+            value = value.strip()
+            if value.startswith("//"):
+                value = "https:" + value
+            if value.startswith("http") and ("n11scdn" in value or "akamaized.net" in value):
+                return value
+    return None
+
+
+def image_url(product, html=None, title=None):
     if html:
         soup = BeautifulSoup(html, "html.parser")
+        title_tokens = set(normalize_text(title or "").split())
+        best_url = None
+        best_score = -1
 
-        meta_candidates = [
-            soup.select_one('meta[property="og:image"]'),
-            soup.select_one('meta[property="og:image:secure_url"]'),
-            soup.select_one('meta[name="twitter:image"]'),
-        ]
-        for meta in meta_candidates:
-            if meta and meta.get("content"):
-                value = meta.get("content").strip()
-                if value.startswith("http"):
-                    return value
+        # n11'in gerçek ürün galerisi HTML içindeki img etiketlerinde bulunuyor.
+        # og:image ve Product JSON-LD bazı sayfalarda ortak/yanlış görsel döndürüyor.
+        for img in soup.select("img"):
+            value = _img_value(img)
+            if not value:
+                continue
 
-        image_src = soup.select_one('link[rel="image_src"]')
-        if image_src and image_src.get("href"):
-            value = image_src.get("href").strip()
-            if value.startswith("http"):
-                return value
+            alt = normalize_text(img.get("alt") or img.get("title") or "")
+            alt_tokens = set(alt.split())
+            overlap = len(title_tokens & alt_tokens) if alt_tokens else 0
+
+            score = overlap
+            if alt and normalize_text(title or "") in alt:
+                score += 100
+            if "400_570" in value or "600_600" in value or "org" in value.casefold():
+                score += 5
+            if "IMG-" in value:
+                score += 3
+
+            if score > best_score:
+                best_score = score
+                best_url = value
+
+        # En azından başlıkla birkaç kelime eşleşen galeri görselini kabul et.
+        if best_url and best_score >= 3:
+            return best_url
 
     image = product.get("image")
     if isinstance(image, list):
@@ -170,7 +193,7 @@ def parse_product_page(product_url, html):
         "brand": brand_name(product),
         "title": title,
         "price": price,
-        "image_url": image_url(product, html),
+        "image_url": image_url(product, html, title),
         "product_url": canonical_url(product_url),
         "in_stock": "outofstock" not in availability,
         "gtin": clean_gtin(product),
@@ -232,48 +255,20 @@ def get_or_create_merchant():
 
 
 def find_offer(merchant_id, mpid):
-    rows = sb(
-        "GET",
-        "offers",
-        {
-            "merchant_id": f"eq.{merchant_id}",
-            "merchant_product_id": f"eq.{mpid}",
-            "select": "id,product_variant_id",
-            "limit": "1",
-        },
-    )
+    rows = sb("GET", "offers", {"merchant_id": f"eq.{merchant_id}", "merchant_product_id": f"eq.{mpid}", "select": "id,product_variant_id", "limit": "1"})
     return rows[0] if rows else None
 
 
 def sync_existing_product_image(variant_id, image):
     if not variant_id or not image:
         return
-
-    rows = sb(
-        "GET",
-        "product_variants",
-        {"id": f"eq.{variant_id}", "select": "id,product_id", "limit": "1"},
-    )
+    rows = sb("GET", "product_variants", {"id": f"eq.{variant_id}", "select": "id,product_id", "limit": "1"})
     if not rows:
         return
-
     product_id = rows[0].get("product_id")
-    sb(
-        "PATCH",
-        "product_variants",
-        {"id": f"eq.{variant_id}"},
-        {"image_url": image},
-        "return=minimal",
-    )
-
+    sb("PATCH", "product_variants", {"id": f"eq.{variant_id}"}, {"image_url": image}, "return=minimal")
     if product_id:
-        sb(
-            "PATCH",
-            "products",
-            {"id": f"eq.{product_id}"},
-            {"image_url": image},
-            "return=minimal",
-        )
+        sb("PATCH", "products", {"id": f"eq.{product_id}"}, {"image_url": image}, "return=minimal")
 
 
 def create_variant(item):
