@@ -187,9 +187,12 @@ def print_summary(results, total_seconds, category_count, stopped=False):
     ok_count = sum(1 for r in results if r["ok"])
     print(f"Başarılı adım: {ok_count}/{len(results)} | Toplam süre: {total_seconds:.1f}s")
     if stopped:
-        print("Pipeline hata nedeniyle durduruldu; sonraki adımlar çalıştırılmadı.")
+        print("Pipeline kritik analiz hatası nedeniyle durduruldu.")
     else:
-        print("PIPELINE TAMAMLANDI.")
+        if failed:
+            print("PIPELINE TAMAMLANDI (bazı collector adımları başarısız oldu).")
+        else:
+            print("PIPELINE TAMAMLANDI.")
     print("=" * 96)
 
 
@@ -221,7 +224,8 @@ def main():
     print(f"Toplam collector çalışması: {len(categories) * len(COLLECTORS)}")
     print("Akış: Tüm kategoriler/mağazalar -> Product Matcher -> Apply Matches -> Deal Engine")
     print("Her alt kategori için categories.json içindeki ilk sorgu ana sorgu olarak kullanılır.")
-    print("Bir collector teknik hata verirse tutarsız veriyle devam etmemek için pipeline durur.")
+    print("Collector hataları loglanır; diğer mağaza/kategoriler çalışmaya devam eder.")
+    print("Sadece Matcher / Apply Matches / Deal Engine gibi kritik analiz adımları hata verirse pipeline durur.")
 
     started = time.time()
     results = []
@@ -240,11 +244,12 @@ def main():
             results.append(result)
 
             if not result["ok"]:
-                total = time.time() - started
-                print_summary(results, total, len(categories), stopped=True)
-                raise SystemExit(2)
+                print(
+                    f"UYARI    | {collector_name} başarısız oldu; "
+                    "pipeline sonraki collector ile devam ediyor."
+                )
 
-    # Eşleştirme ve fırsat hesapları tüm mağaza/kategori verileri toplandıktan sonra bir kez çalışır.
+    # Eşleştirme ve fırsat hesapları tüm ulaşılabilen mağaza/kategori verileri toplandıktan sonra bir kez çalışır.
     for stage, name, script in POST_STEPS:
         result = run_post_step(stage, name, script)
         results.append(result)
