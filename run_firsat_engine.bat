@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
 REM ================================================================
@@ -31,42 +31,49 @@ if "%SUPABASE_SERVICE_ROLE_KEY%"=="" (
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
 
 for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "STAMP=%%I"
-set "LOGFILE=%LOGDIR%\pipeline_%STAMP%.log"
+set "LOGFILE=%LOGDIR%\pipeline_!STAMP!.log"
 
 cd /d "%ROOT%"
 
 REM CATEGORY_LIMIT ve CATEGORY_SLUG temizlenir; boylece tum aktif alt kategoriler calisir.
 set "CATEGORY_LIMIT="
 set "CATEGORY_SLUG="
+
+REM Windows konsol/log encoding farklari collector'lari dusurmesin.
 set "PYTHONUNBUFFERED=1"
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 
 echo ================================================================
 echo FIRSAT ENGINE BASLADI
 echo Tarih: %date% %time%
-echo Log: %LOGFILE%
+echo Log: !LOGFILE!
 echo ================================================================
 
-echo ================================================================>>"%LOGFILE%"
-echo FIRSAT ENGINE BASLADI>>"%LOGFILE%"
-echo Tarih: %date% %time%>>"%LOGFILE%"
-echo ================================================================>>"%LOGFILE%"
+echo ================================================================>>"!LOGFILE!"
+echo FIRSAT ENGINE BASLADI>>"!LOGFILE!"
+echo Tarih: %date% %time%>>"!LOGFILE!"
+echo ================================================================>>"!LOGFILE!"
 
-"%PYTHON%" run_pipeline.py >>"%LOGFILE%" 2>&1
-set "EXITCODE=%ERRORLEVEL%"
+"%PYTHON%" run_pipeline.py >>"!LOGFILE!" 2>&1
+set "EXITCODE=!ERRORLEVEL!"
 
-echo.>>"%LOGFILE%"
-echo ================================================================>>"%LOGFILE%"
-echo FIRSAT ENGINE BITTI - CODE=%EXITCODE%>>"%LOGFILE%"
-echo Tarih: %date% %time%>>"%LOGFILE%"
-echo ================================================================>>"%LOGFILE%"
+REM ERRORLEVEL her durumda sayisal bir deger olmali; beklenmedik boslukta hata say.
+if not defined EXITCODE set "EXITCODE=1"
+
+echo.>>"!LOGFILE!"
+echo ================================================================>>"!LOGFILE!"
+echo FIRSAT ENGINE BITTI - CODE=!EXITCODE!>>"!LOGFILE!"
+echo Tarih: %date% %time%>>"!LOGFILE!"
+echo ================================================================>>"!LOGFILE!"
 
 echo ================================================================
-if "%EXITCODE%"=="0" (
+if "!EXITCODE!"=="0" (
     echo FIRSAT ENGINE TAMAMLANDI - OK
 ) else (
-    echo FIRSAT ENGINE HATA ILE BITTI - CODE=%EXITCODE%
+    echo FIRSAT ENGINE HATA ILE BITTI - CODE=!EXITCODE!
 )
-echo Log: %LOGFILE%
+echo Log: !LOGFILE!
 echo ================================================================
 
-exit /b %EXITCODE%
+exit /b !EXITCODE!
