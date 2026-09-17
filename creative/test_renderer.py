@@ -7,7 +7,7 @@ from creative.generate_deal_creative import render
 
 SAMPLE = {
     "id": "stanley-smoke-test",
-    "title": "Stanley Classic 1.9 Litre Vakumlu Termos",
+    "title": "Stanley The Transit Fliptop Mug 0.47L Krem Termos",
     "brand": "STANLEY",
     "cheapest_price": "1959.00",
     "competitor_price": "3599.00",
