@@ -6,7 +6,7 @@ set "PYTHONIOENCODING=utf-8"
 set "ROOT=C:\firsat-engine\firsat-engine-main"
 set "PYTHON=C:\firsat-engine\.venv\Scripts\python.exe"
 cd /d "%ROOT%"
-"%PYTHON%" creative\test_renderer.py
+"%PYTHON%" -m creative.test_renderer
 set "CODE=%ERRORLEVEL%"
 if not "%CODE%"=="0" exit /b %CODE%
 echo.
