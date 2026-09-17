@@ -12,7 +12,12 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 OUT_DIR = Path(os.getenv("CREATIVE_OUTPUT_DIR", "creative_output"))
-W, H = 1080, 1350
+FORMATS = {
+    "instagram": (1080, 1350),
+    "story": (1080, 1920),
+    "site": (1200, 675),
+}
+W, H = FORMATS["instagram"]
 
 NAVY = (8, 24, 58)
 NAVY_2 = (18, 31, 82)
@@ -166,10 +171,12 @@ def main():
     parser = argparse.ArgumentParser(description="Fiyatzade deal creative generator")
     parser.add_argument("--candidate-id")
     parser.add_argument("--output")
+    parser.add_argument("--format", choices=FORMATS.keys(), default="instagram")
     args = parser.parse_args()
 
     data = load_candidate(args.candidate_id)
-    output = Path(args.output) if args.output else OUT_DIR / f"deal_{data['id']}_1080x1350.png"
+    width, height = FORMATS[args.format]
+    output = Path(args.output) if args.output else OUT_DIR / f"deal_{data['id']}_{args.format}_{width}x{height}.png"
     render(data, output)
     print(f"CREATIVE OK | {output}")
     print(f"{data['title']} | {money(data['cheapest_price'])} | %{float(data['gap_percent']):.2f} | {data['merchant']}")
