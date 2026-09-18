@@ -10,6 +10,8 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
+from publishers.x_publisher import publish_x_post
+
 from creative.generate_deal_creative import (
     load_candidates,
     money,
@@ -124,6 +126,27 @@ def publish_to_telegram(data):
             files={"photo": image},
         )
     return str(result["message_id"])
+
+
+def x_caption(data):
+    gap = f"{float(data['gap_percent']):.2f}".replace(".", ",")
+    text = (
+        f"🔥 FİYATZADE FIRSATI\n\n"
+        f"{data['title']}\n\n"
+        f"🛒 {data['merchant']}\n"
+        f"🔥 {money(data['cheapest_price'])}\n"
+        f"📉 %{gap} daha ucuz\n\n"
+        f"🔗 {data['product_url']}\n\n"
+        "#işbirliği #reklam"
+    )
+    # Keep room for X's URL counting/normalization and avoid API rejection.
+    return text[:270]
+
+
+def publish_to_x(data):
+    outputs = render_candidate_bundle(data)
+    image = outputs["site"]
+    return publish_x_post(x_caption(data), image)
 
 
 def mark_publication(candidate_id, platform, status, *, external_post_id=None, error_message=None):
@@ -267,34 +290,44 @@ def handle_callback(query):
     if action == "publish":
         try:
             persist_publish_request(candidate_id)
+            data = load_candidate_for_publish(candidate_id)
+            results = []
+
             telegram_state = publication_state(candidate_id, "telegram")
             if telegram_state and telegram_state.get("status") == "published":
                 message_id = telegram_state.get("external_post_id") or "-"
-                answer_callback(callback_id, "Bu fırsat Telegram'da zaten yayınlandı.")
+                results.append("Telegram zaten yayınlandı")
                 print(f"APPROVAL PUBLISH SKIP | {candidate_id} | telegram=already_published | message_id={message_id}")
-                return
+            else:
+                try:
+                    mark_publication(candidate_id, "telegram", "publishing")
+                    message_id = publish_to_telegram(data)
+                    mark_publication(candidate_id, "telegram", "published", external_post_id=message_id)
+                    results.append("Telegram yayınlandı")
+                    print(f"APPROVAL PUBLISH | {candidate_id} | telegram=published | message_id={message_id}")
+                except Exception as publish_exc:
+                    mark_publication(candidate_id, "telegram", "failed", error_message=str(publish_exc)[:1000])
+                    results.append("Telegram başarısız")
+                    print(f"TELEGRAM PUBLISH ERROR | {candidate_id} | {publish_exc}")
 
-            data = load_candidate_for_publish(candidate_id)
-            try:
-                mark_publication(candidate_id, "telegram", "publishing")
-                message_id = publish_to_telegram(data)
-                mark_publication(
-                    candidate_id,
-                    "telegram",
-                    "published",
-                    external_post_id=message_id,
-                )
-                answer_callback(callback_id, "PAYLAŞ alındı. Telegram'da yayınlandı.")
-                print(f"APPROVAL PUBLISH | {candidate_id} | telegram=published | message_id={message_id}")
-            except Exception as publish_exc:
-                mark_publication(
-                    candidate_id,
-                    "telegram",
-                    "failed",
-                    error_message=str(publish_exc)[:1000],
-                )
-                answer_callback(callback_id, "PAYLAŞ alındı. Telegram yayını başarısız.")
-                print(f"TELEGRAM PUBLISH ERROR | {candidate_id} | {publish_exc}")
+            x_state = publication_state(candidate_id, "x")
+            if x_state and x_state.get("status") == "published":
+                post_id = x_state.get("external_post_id") or "-"
+                results.append("X zaten yayınlandı")
+                print(f"APPROVAL PUBLISH SKIP | {candidate_id} | x=already_published | post_id={post_id}")
+            else:
+                try:
+                    mark_publication(candidate_id, "x", "publishing")
+                    post_id = publish_to_x(data)
+                    mark_publication(candidate_id, "x", "published", external_post_id=post_id)
+                    results.append("X yayınlandı")
+                    print(f"APPROVAL PUBLISH | {candidate_id} | x=published | post_id={post_id}")
+                except Exception as publish_exc:
+                    mark_publication(candidate_id, "x", "failed", error_message=str(publish_exc)[:1000])
+                    results.append("X başarısız")
+                    print(f"X PUBLISH ERROR | {candidate_id} | {publish_exc}")
+
+            answer_callback(callback_id, "PAYLAŞ: " + " | ".join(results))
         except Exception as exc:
             answer_callback(callback_id, "PAYLAŞ kaydedilemedi.")
             print(f"APPROVAL PUBLISH ERROR | {candidate_id} | {exc}")
