@@ -41,6 +41,13 @@ def sb_get(table, params):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _one(table, params, label):
+    rows = sb_get(table, params)
+    if not rows:
+        raise RuntimeError(f"{label} bulunamadi")
+    return rows[0]
+
+
 def load_candidate(candidate_id=None):
     params = {
         "select": "id,canonical_product_id,cheapest_offer_id,cheapest_merchant_id,cheapest_price,competitor_price,gap_percent,verified,history_status",
@@ -48,14 +55,24 @@ def load_candidate(candidate_id=None):
     }
     if candidate_id:
         params["id"] = f"eq.{candidate_id}"
-    rows = sb_get("deal_candidates", params)
-    if not rows:
-        raise RuntimeError("Uygun deal_candidate bulunamadi")
-    dc = rows[0]
-    product = sb_get("canonical_products", {"select": "id,brand,title", "id": f"eq.{dc['canonical_product_id']}", "limit": "1"})[0]
-    offer = sb_get("offers", {"select": "id,image_url,product_url", "id": f"eq.{dc['cheapest_offer_id']}", "limit": "1"})[0]
-    merchant = sb_get("merchants", {"select": "id,name", "id": f"eq.{dc['cheapest_merchant_id']}", "limit": "1"})[0]
-    return {**dc, **product, **offer, "merchant": merchant["name"]}
+    dc = _one("deal_candidates", params, "Uygun deal_candidate")
+
+    product = _one("canonical_products", {
+        "select": "id,brand,title", "id": f"eq.{dc['canonical_product_id']}", "limit": "1"
+    }, "canonical_product")
+    offer = _one("offers", {
+        "select": "id,image_url,product_url", "id": f"eq.{dc['cheapest_offer_id']}", "limit": "1"
+    }, "cheapest_offer")
+    merchant = _one("merchants", {
+        "select": "id,name", "id": f"eq.{dc['cheapest_merchant_id']}", "limit": "1"
+    }, "merchant")
+
+    data = {**dc, **product, **offer, "merchant": merchant["name"]}
+    required = ("title", "image_url", "merchant", "cheapest_price", "competitor_price", "gap_percent")
+    missing = [key for key in required if data.get(key) in (None, "")]
+    if missing:
+        raise RuntimeError("Creative verisi eksik: " + ", ".join(missing))
+    return data
 
 
 def font(size, bold=False):
@@ -274,6 +291,20 @@ def render_site(data, product):
 RENDERERS={"instagram":render_instagram,"story":render_story,"site":render_site}
 
 
+def output_path_for(data, format_name):
+    width, height = FORMATS[format_name]
+    return OUT_DIR / f"deal_{data['id']}_{format_name}_{width}x{height}.png"
+
+
+def render_candidate_bundle(data):
+    outputs = {}
+    for format_name in FORMATS:
+        output = output_path_for(data, format_name)
+        render(data, output, format_name)
+        outputs[format_name] = output
+    return outputs
+
+
 def render(data, output_path, format_name="instagram"):
     if format_name not in RENDERERS:
         raise ValueError(f"Bilinmeyen format: {format_name}")
@@ -291,13 +322,18 @@ def main():
     parser.add_argument("--all-formats",action="store_true")
     args=parser.parse_args()
     data=load_candidate(args.candidate_id)
-    selected=list(FORMATS) if args.all_formats else [args.format]
-    for format_name in selected:
-        width,height=FORMATS[format_name]
-        output=Path(args.output) if args.output and len(selected)==1 else OUT_DIR/f"deal_{data['id']}_{format_name}_{width}x{height}.png"
-        render(data,output,format_name)
-        print(f"CREATIVE OK | {format_name} | {output}")
-    print(f"{data['title']} | {money(data['cheapest_price'])} | %{float(data['gap_percent']):.2f} | {data['merchant']}")
+
+    # Production default: a real candidate produces the complete publish bundle.
+    if args.all_formats:
+        outputs = render_candidate_bundle(data)
+        for format_name, output in outputs.items():
+            print(f"CREATIVE OK | {format_name} | {output}")
+    else:
+        output = Path(args.output) if args.output else output_path_for(data, args.format)
+        render(data, output, args.format)
+        print(f"CREATIVE OK | {args.format} | {output}")
+
+    print(f"CANDIDATE | {data['id']} | {data['title']} | {money(data['cheapest_price'])} | %{float(data['gap_percent']):.2f} | {data['merchant']}")
 
 
 if __name__=="__main__":
