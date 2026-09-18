@@ -137,7 +137,7 @@ def product_panel(canvas, draw, product, box):
     x1,y1,x2,y2 = box
     draw.rounded_rectangle(box, 34, fill=WHITE, outline=LINE, width=2)
     w,h=x2-x1,y2-y1
-    fitted=ImageOps.contain(product,(int(w*.90),int(h*.90)))
+    fitted=ImageOps.contain(product,(int(w*.97),int(h*.97)))
     canvas.paste(fitted,(x1+(w-fitted.width)//2,y1+(h-fitted.height)//2),fitted)
 
 
@@ -181,18 +181,20 @@ def render_instagram(data, product):
     for i,line in enumerate(wrap_lines(draw,data["title"],tf,920,3)):
         draw.text((58,195+i*50),line,font=tf,fill=NAVY_DARK)
 
-    product_panel(canvas,draw,product,(430,350,1020,1025))
-    discount_badge(draw,(700,300,1015,435),data["gap_percent"],48,21)
-    price_card(draw,(55,690,425,950),data,1.0)
-    draw.rounded_rectangle((55,965,425,1040),22,fill=WHITE,outline=LINE,width=2)
-    draw.text((82,986),str(data["merchant"]),font=font(27,True),fill=NAVY_DARK)
+    # V2.2: product is the hero; pricing is a large supporting block.
+    product_panel(canvas,draw,product,(355,335,1025,1035))
+    discount_badge(draw,(715,285,1020,430),data["gap_percent"],50,21)
 
-    draw.rounded_rectangle((535,1060,1015,1145),42,fill=ORANGE)
-    draw.text((600,1078),"FIRSATI YAKALA  →",font=font(31,True),fill=WHITE)
-    draw.text((535,1165),"Fiyatlar değişebilir. Satın alma mağazada tamamlanır.",font=font(18),fill=MUTED)
+    price_card(draw,(55,600,380,900),data,1.12)
+    draw.rounded_rectangle((55,920,380,1005),22,fill=WHITE,outline=LINE,width=2)
+    draw.text((82,943),str(data["merchant"]),font=font(29,True),fill=NAVY_DARK)
+
+    draw.rounded_rectangle((475,1065,1018,1160),46,fill=ORANGE)
+    draw.text((560,1087),"FIRSATI YAKALA  →",font=font(32,True),fill=WHITE)
+    draw.text((475,1180),"Fiyatlar değişebilir. Satın alma mağazada tamamlanır.",font=font(18),fill=MUTED)
     if not data.get("verified"):
-        draw.text((55,1170),"Geçmiş fiyat doğrulaması bekleniyor",font=font(16),fill=MUTED)
-    draw_footer(draw,1230,1080,15)
+        draw.text((55,1045),"Geçmiş fiyat doğrulaması bekleniyor",font=font(16),fill=MUTED)
+    draw_footer(draw,1240,1080,15)
     return canvas
 
 
@@ -204,13 +206,13 @@ def render_story(data, product):
     for i,line in enumerate(wrap_lines(draw,data["title"],tf,930,3)):
         draw.text((60,225+i*56),line,font=tf,fill=NAVY_DARK)
 
-    product_panel(canvas,draw,product,(145,430,935,1160))
-    discount_badge(draw,(650,390,970,535),data["gap_percent"],50,22)
-    price_card(draw,(70,1210,565,1500),data,1.1)
-    draw.rounded_rectangle((595,1210,1010,1350),28,fill=WHITE,outline=LINE,width=2)
-    draw.text((630,1252),str(data["merchant"]),font=font(30,True),fill=NAVY_DARK)
-    draw.rounded_rectangle((595,1380,1010,1485),45,fill=ORANGE)
-    draw.text((640,1405),"FIRSATI YAKALA →",font=font(28,True),fill=WHITE)
+    product_panel(canvas,draw,product,(100,405,980,1195))
+    discount_badge(draw,(655,360,985,515),data["gap_percent"],52,23)
+    price_card(draw,(70,1240,590,1550),data,1.16)
+    draw.rounded_rectangle((620,1240,1010,1375),28,fill=WHITE,outline=LINE,width=2)
+    draw.text((652,1282),str(data["merchant"]),font=font(30,True),fill=NAVY_DARK)
+    draw.rounded_rectangle((620,1410,1010,1525),48,fill=ORANGE)
+    draw.text((656,1438),"FIRSATI YAKALA →",font=font(27,True),fill=WHITE)
     draw.text((70,1545),"Fiyatlar değişebilir. Satın alma mağazada tamamlanır.",font=font(20),fill=MUTED)
     if not data.get("verified"):
         draw.text((70,1590),"Geçmiş fiyat doğrulaması bekleniyor",font=font(17),fill=MUTED)
@@ -226,9 +228,9 @@ def render_site(data, product):
     for i,line in enumerate(wrap_lines(draw,data["title"],tf,520,3)):
         draw.text((45,140+i*35),line,font=tf,fill=NAVY_DARK)
 
-    product_panel(canvas,draw,product,(490,130,855,590))
-    discount_badge(draw,(850,125,1145,250),data["gap_percent"],41,18)
-    price_card(draw,(45,330,440,540),data,.82)
+    product_panel(canvas,draw,product,(455,120,875,605))
+    discount_badge(draw,(835,110,1148,245),data["gap_percent"],43,19)
+    price_card(draw,(45,315,425,555),data,.90)
     draw.text((875,315),str(data["merchant"]),font=font(25,True),fill=NAVY_DARK)
     draw.rounded_rectangle((875,365,1145,435),32,fill=ORANGE)
     draw.text((910,383),"FIRSATI YAKALA →",font=font(19,True),fill=WHITE)
