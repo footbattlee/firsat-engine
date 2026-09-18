@@ -95,7 +95,14 @@ def send_candidate(data):
 
 
 def answer_callback(callback_id, text):
-    api("answerCallbackQuery", data={"callback_query_id": callback_id, "text": text})
+    try:
+        api("answerCallbackQuery", data={"callback_query_id": callback_id, "text": text})
+    except requests.HTTPError as exc:
+        # Telegram callback queries expire quickly. An old button press may still
+        # reach getUpdates but can no longer be acknowledged. Do not crash the bot.
+        response = getattr(exc, "response", None)
+        detail = response.text if response is not None else str(exc)
+        print(f"CALLBACK ACK WARNING | {detail}")
 
 
 def handle_callback(query):
