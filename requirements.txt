@@ -2,3 +2,4 @@ playwright==1.55.0
 requests>=2.32.0
 beautifulsoup4>=4.12.0
 Pillow>=11.0.0
+python-dotenv>=1.0.0
