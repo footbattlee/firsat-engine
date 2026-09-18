@@ -312,10 +312,17 @@ def output_path_for(data, format_name):
 
 def render_candidate_bundle(data):
     outputs = {}
+    errors = {}
     for format_name in FORMATS:
         output = output_path_for(data, format_name)
-        render(data, output, format_name)
-        outputs[format_name] = output
+        try:
+            render(data, output, format_name)
+            outputs[format_name] = output
+        except Exception as exc:
+            errors[format_name] = str(exc)
+    if errors:
+        details = " | ".join(f"{name}: {message}" for name, message in errors.items())
+        raise RuntimeError(details)
     return outputs
 
 
