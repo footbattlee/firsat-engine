@@ -12,7 +12,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 OUT_DIR = Path(os.getenv("CREATIVE_OUTPUT_DIR", "creative_output"))
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
-LOGO_PATH = Path(os.getenv("FIYATZADE_LOGO", str(ASSET_DIR / "fiyatzade_logo.png")))
+LOGO_PATH = Path(os.getenv("FIYATZADE_LOGO", str(ASSET_DIR / "fiyatzade_logo.jpg")))
 
 FORMATS = {"instagram": (1080, 1350), "story": (1080, 1920), "site": (1200, 675)}
 
@@ -119,11 +119,15 @@ def draw_brand(draw, x, y, scale=1.0):
 
 
 def paste_logo_asset(canvas, x, y, max_size):
-    if not LOGO_PATH.exists():
+    candidates = [LOGO_PATH, ASSET_DIR / "fiyatzade_logo.jpg", ASSET_DIR / "fiyatzade_logo.jpeg", ASSET_DIR / "fiyatzade_logo.png"]
+    logo_path = next((p for p in candidates if p.exists()), None)
+    if logo_path is None:
         return False
-    logo = Image.open(LOGO_PATH).convert("RGBA")
-    logo = ImageOps.contain(logo, max_size)
-    canvas.paste(logo, (x, y), logo)
+    logo = Image.open(logo_path).convert("RGB")
+    # User-approved square logo: keep its artwork intact and present it as a compact brand mark.
+    logo = ImageOps.fit(logo, (max_size[1], max_size[1]), method=Image.Resampling.LANCZOS)
+    mask = Image.new("L", logo.size, 255)
+    canvas.paste(logo, (x, y), mask)
     return True
 
 
@@ -189,7 +193,10 @@ def draw_footer(draw, y, width, size=17):
 
 def render_instagram(data, product):
     canvas,draw=light_canvas(FORMATS["instagram"])
-    draw_header(canvas,draw,55,42,(290,88),805,62,17)
+    draw_header(canvas,draw,55,42,(88,88),805,62,17)
+    # Wordmark is separate from the supplied square logo asset.
+    if LOGO_PATH.exists() or any((ASSET_DIR / n).exists() for n in ("fiyatzade_logo.jpg","fiyatzade_logo.jpeg","fiyatzade_logo.png")):
+        draw.text((158,58),"FİYATZADE",font=font(36,True),fill=NAVY)
     draw.text((58,155),(data.get("brand") or "FIRSAT").upper(),font=font(28,True),fill=ORANGE)
     tf=font(43,True)
     for i,line in enumerate(wrap_lines(draw,data["title"],tf,920,3)):
@@ -199,17 +206,19 @@ def render_instagram(data, product):
     product_panel(canvas,draw,product,(355,335,1025,1035))
     discount_badge(draw,(715,285,1020,430),data["gap_percent"],50,21)
 
-    # Price starts directly below the title: no dead upper-left area.
-    price_card(draw,(55,350,385,665),data,1.18)
-    merchant_badge(draw,(55,685,385,780),data["merchant"])
+    # V2.4: strict two-column grid. Nothing from the left column may enter the product card.
+    discount_badge(draw,(55,350,330,500),data["gap_percent"],46,20)
+    merchant_badge(draw,(55,525,330,620),data["merchant"])
 
-    draw.rounded_rectangle((55,825,385,920),42,fill=ORANGE)
-    draw.text((88,850),"FIRSATI YAKALA →",font=font(24,True),fill=WHITE)
+    # Price moves to the former CTA zone and gets the strongest text hierarchy.
+    price_card(draw,(55,690,330,965),data,1.05)
 
-    draw.text((55,970),"Fiyatlar değişebilir.",font=font(17),fill=MUTED)
-    draw.text((55,998),"Satın alma mağazada tamamlanır.",font=font(17),fill=MUTED)
+    # CTA belongs to the product column, directly below the product.
+    draw.rounded_rectangle((430,1060,1018,1155),46,fill=ORANGE)
+    draw.text((545,1082),"FIRSATI YAKALA  →",font=font(31,True),fill=WHITE)
+    draw.text((430,1175),"Fiyatlar değişebilir. Satın alma mağazada tamamlanır.",font=font(17),fill=MUTED)
     if not data.get("verified"):
-        draw.text((55,1040),"Fiyat geçmişi kontrol ediliyor",font=font(15),fill=MUTED)
+        draw.text((55,1000),"Fiyat geçmişi kontrol ediliyor",font=font(15),fill=MUTED)
     draw_footer(draw,1235,1080,15)
     return canvas
 
