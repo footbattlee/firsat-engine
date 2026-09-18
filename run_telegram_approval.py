@@ -11,6 +11,7 @@ import requests
 from dotenv import load_dotenv
 
 from publishers.x_publisher import publish_x_post
+from publishers.instagram_publisher import publish_instagram_post
 
 from creative.generate_deal_creative import (
     load_candidates,
@@ -141,6 +142,26 @@ def x_caption(data):
     )
     # Keep room for X's URL counting/normalization and avoid API rejection.
     return text[:270]
+
+
+def instagram_caption(data):
+    gap = f"{float(data['gap_percent']):.2f}".replace(".", ",")
+    return (
+        f"🔥 FİYATZADE FIRSATI\n\n"
+        f"{data['title']}\n\n"
+        f"🛒 {data['merchant']}\n"
+        f"💸 Rakip fiyat: {money(data['competitor_price'])}\n"
+        f"🔥 Fırsat fiyatı: {money(data['cheapest_price'])}\n"
+        f"📉 %{gap} daha ucuz\n\n"
+        "Fiyatlar değişebilir. Satın almadan önce mağaza fiyatını kontrol edin.\n\n"
+        "#işbirliği #reklam #fiyatzade #indirim #fırsat"
+    )
+
+
+def publish_to_instagram(data):
+    outputs = render_candidate_bundle(data)
+    image = outputs["instagram"]
+    return publish_instagram_post(instagram_caption(data), image, data["id"])
 
 
 def publish_to_x(data):
@@ -309,6 +330,23 @@ def handle_callback(query):
                     mark_publication(candidate_id, "telegram", "failed", error_message=str(publish_exc)[:1000])
                     results.append("Telegram başarısız")
                     print(f"TELEGRAM PUBLISH ERROR | {candidate_id} | {publish_exc}")
+
+            instagram_state = publication_state(candidate_id, "instagram")
+            if instagram_state and instagram_state.get("status") == "published":
+                media_id = instagram_state.get("external_post_id") or "-"
+                results.append("Instagram zaten yayınlandı")
+                print(f"APPROVAL PUBLISH SKIP | {candidate_id} | instagram=already_published | media_id={media_id}")
+            else:
+                try:
+                    mark_publication(candidate_id, "instagram", "publishing")
+                    media_id = publish_to_instagram(data)
+                    mark_publication(candidate_id, "instagram", "published", external_post_id=media_id)
+                    results.append("Instagram yayınlandı")
+                    print(f"APPROVAL PUBLISH | {candidate_id} | instagram=published | media_id={media_id}")
+                except Exception as publish_exc:
+                    mark_publication(candidate_id, "instagram", "failed", error_message=str(publish_exc)[:1000])
+                    results.append("Instagram başarısız")
+                    print(f"INSTAGRAM PUBLISH ERROR | {candidate_id} | {publish_exc}")
 
             x_state = publication_state(candidate_id, "x")
             if x_state and x_state.get("status") == "published":
