@@ -198,23 +198,31 @@ def handle_callback(query):
 
 
 def discard_pending_callbacks():
-    """Advance Telegram's update offset so stale button presses are not replayed."""
-    updates = api(
-        "getUpdates",
-        data={"timeout": 0, "allowed_updates": '["callback_query"]'},
-        timeout=15,
-    )
-    if not updates:
-        return None
+    """Drain and acknowledge every queued Telegram update before listening."""
+    offset = None
+    cleared = 0
 
-    offset = max(update["update_id"] for update in updates) + 1
-    # Confirm the new offset once; Telegram then forgets all older updates.
-    api(
-        "getUpdates",
-        data={"offset": offset, "timeout": 0, "allowed_updates": '["callback_query"]'},
-        timeout=15,
-    )
-    print(f"STALE CALLBACKS CLEARED | count={len(updates)}")
+    while True:
+        data = {"timeout": 0, "limit": 100, "allowed_updates": '["callback_query"]'}
+        if offset is not None:
+            data["offset"] = offset
+        updates = api("getUpdates", data=data, timeout=15)
+        if not updates:
+            break
+
+        cleared += len(updates)
+        offset = max(update["update_id"] for update in updates) + 1
+
+        # A positive offset confirms all preceding updates. Keep draining in case
+        # Telegram had more than one page of stale callbacks queued.
+        api(
+            "getUpdates",
+            data={"offset": offset, "timeout": 0, "limit": 100, "allowed_updates": '["callback_query"]'},
+            timeout=15,
+        )
+
+    if cleared:
+        print(f"STALE CALLBACKS CLEARED | count={cleared}")
     return offset
 
 
