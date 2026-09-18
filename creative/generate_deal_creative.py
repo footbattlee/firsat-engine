@@ -336,7 +336,15 @@ def render(data, output_path, format_name="instagram"):
     product=download_image(data["image_url"])
     canvas=RENDERERS[format_name](data,product)
     output_path=Path(output_path); output_path.parent.mkdir(parents=True,exist_ok=True)
-    canvas.save(output_path,"PNG",optimize=True)
+    # Pillow's optimize path can intermittently raise WinError/Errno 22 on
+    # Windows for otherwise valid PNGs. Save through an in-memory buffer and
+    # atomically replace the destination instead.
+    buffer = io.BytesIO()
+    canvas.save(buffer, "PNG")
+    temp_path = output_path.with_suffix(output_path.suffix + ".tmp")
+    with open(temp_path, "wb") as handle:
+        handle.write(buffer.getvalue())
+    os.replace(temp_path, output_path)
     return output_path
 
 
