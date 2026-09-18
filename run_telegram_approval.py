@@ -1,7 +1,10 @@
 import argparse
 import html
+import json
 import os
 import time
+from datetime import datetime, timezone
+from urllib.parse import urlencode
 from pathlib import Path
 
 import requests
@@ -21,6 +24,9 @@ load_dotenv(ROOT / ".env")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 APPROVAL_CHAT_ID = os.getenv("TELEGRAM_APPROVAL_CHAT_ID", "").strip()
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+PLATFORMS = ("telegram", "instagram", "x", "whatsapp")
 
 
 def require_config(require_chat_id=True):
@@ -29,6 +35,8 @@ def require_config(require_chat_id=True):
         missing.append("TELEGRAM_BOT_TOKEN")
     if require_chat_id and not APPROVAL_CHAT_ID:
         missing.append("TELEGRAM_APPROVAL_CHAT_ID")
+    if not SUPABASE_SERVICE_ROLE_KEY:
+        missing.append("SUPABASE_SERVICE_ROLE_KEY")
     if missing:
         raise RuntimeError(".env eksik: " + ", ".join(missing))
 
@@ -40,6 +48,63 @@ def api(method, *, data=None, files=None, timeout=45):
     if not payload.get("ok"):
         raise RuntimeError(f"Telegram {method}: {payload}")
     return payload["result"]
+
+
+def sb_headers(extra=None):
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+    }
+    if extra:
+        headers.update(extra)
+    return headers
+
+
+def sb_patch(table, filters, values):
+    url = f"{SUPABASE_URL}/rest/v1/{table}?" + urlencode(filters, safe=".*:-+")
+    response = requests.patch(url, headers=sb_headers({"Prefer": "return=minimal"}), json=values, timeout=30)
+    response.raise_for_status()
+
+
+def sb_upsert(table, rows, on_conflict):
+    url = f"{SUPABASE_URL}/rest/v1/{table}?on_conflict={on_conflict}"
+    response = requests.post(
+        url,
+        headers=sb_headers({"Prefer": "resolution=merge-duplicates,return=minimal"}),
+        json=rows,
+        timeout=30,
+    )
+    response.raise_for_status()
+
+
+def persist_publish_request(candidate_id):
+    now = datetime.now(timezone.utc).isoformat()
+    rows = [
+        {
+            "deal_candidate_id": candidate_id,
+            "platform": platform,
+            "status": "pending",
+            "external_post_id": None,
+            "error_message": None,
+            "published_at": None,
+            "updated_at": now,
+        }
+        for platform in PLATFORMS
+    ]
+    # Unique(deal_candidate_id, platform) makes repeated PAYLAS presses idempotent.
+    sb_upsert("deal_publications", rows, "deal_candidate_id,platform")
+
+
+def persist_rejection(candidate_id):
+    now = datetime.now(timezone.utc).isoformat()
+    sb_patch("deal_candidates", {"id": f"eq.{candidate_id}"}, {"status": "rejected", "updated_at": now})
+    # A rejection cancels only work that has not been published yet.
+    sb_patch(
+        "deal_publications",
+        {"deal_candidate_id": f"eq.{candidate_id}", "status": "in.(pending,publishing)"},
+        {"status": "failed", "error_message": "Rejected by admin", "updated_at": now},
+    )
 
 
 def caption(data, validation):
@@ -78,7 +143,6 @@ def send_candidate(data):
 
     outputs = render_candidate_bundle(data)
     preview = outputs["instagram"]
-    import json
     with open(preview, "rb") as image:
         api(
             "sendPhoto",
@@ -113,14 +177,22 @@ def handle_callback(query):
         return
     action, candidate_id = raw.split(":", 1)
 
-    # V1 intentionally stops here: first prove Telegram approval works.
-    # Social publishers and DB status persistence are connected next.
     if action == "publish":
-        answer_callback(callback_id, "PAYLAŞ alındı. Publisher henüz bağlı değil.")
-        print(f"APPROVAL PUBLISH | {candidate_id}")
+        try:
+            persist_publish_request(candidate_id)
+            answer_callback(callback_id, "PAYLAŞ alındı. Yayın kuyruğuna eklendi.")
+            print(f"APPROVAL PUBLISH | {candidate_id} | DB=pending")
+        except Exception as exc:
+            answer_callback(callback_id, "PAYLAŞ kaydedilemedi.")
+            print(f"APPROVAL PUBLISH ERROR | {candidate_id} | {exc}")
     elif action == "reject":
-        answer_callback(callback_id, "REDDET alındı.")
-        print(f"APPROVAL REJECT | {candidate_id}")
+        try:
+            persist_rejection(candidate_id)
+            answer_callback(callback_id, "REDDET kaydedildi.")
+            print(f"APPROVAL REJECT | {candidate_id} | DB=rejected")
+        except Exception as exc:
+            answer_callback(callback_id, "REDDET kaydedilemedi.")
+            print(f"APPROVAL REJECT ERROR | {candidate_id} | {exc}")
     else:
         answer_callback(callback_id, "Bilinmeyen işlem")
 
