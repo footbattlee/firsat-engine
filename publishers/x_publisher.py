@@ -43,7 +43,7 @@ def upload_image(image_path):
     # X API v2 one-shot media upload. Images are small enough to avoid
     # the INIT/APPEND/FINALIZE flow used for large media/video.
     payload = {
-        "media_data": base64.b64encode(raw).decode("ascii"),
+        "media": base64.b64encode(raw).decode("ascii"),
         "media_category": "tweet_image",
         "media_type": mime_type,
     }
