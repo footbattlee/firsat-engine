@@ -81,7 +81,19 @@ def load_candidates(limit=1, candidate_id=None):
             "select": "id,name", "id": f"eq.{dc['cheapest_merchant_id']}", "limit": "1"
         }, "merchant")
 
-        data = {**dc, **product, **offer, "merchant": merchant["name"]}
+        # Keep the deal candidate ID authoritative. product/offer rows also have
+        # an "id" field and must not overwrite it, because Telegram callbacks and
+        # publication FK records are keyed by deal_candidates.id.
+        data = {
+            **dc,
+            "product_id": product["id"],
+            "brand": product.get("brand"),
+            "title": product.get("title"),
+            "offer_id": offer["id"],
+            "image_url": offer.get("image_url"),
+            "product_url": offer.get("product_url"),
+            "merchant": merchant["name"],
+        }
         required = ("title", "image_url", "merchant", "cheapest_price", "competitor_price", "gap_percent")
         missing = [key for key in required if data.get(key) in (None, "")]
         if missing:
