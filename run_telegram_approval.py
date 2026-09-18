@@ -197,9 +197,30 @@ def handle_callback(query):
         answer_callback(callback_id, "Bilinmeyen işlem")
 
 
+def discard_pending_callbacks():
+    """Advance Telegram's update offset so stale button presses are not replayed."""
+    updates = api(
+        "getUpdates",
+        data={"timeout": 0, "allowed_updates": '["callback_query"]'},
+        timeout=15,
+    )
+    if not updates:
+        return None
+
+    offset = max(update["update_id"] for update in updates) + 1
+    # Confirm the new offset once; Telegram then forgets all older updates.
+    api(
+        "getUpdates",
+        data={"offset": offset, "timeout": 0, "allowed_updates": '["callback_query"]'},
+        timeout=15,
+    )
+    print(f"STALE CALLBACKS CLEARED | count={len(updates)}")
+    return offset
+
+
 def poll():
+    offset = discard_pending_callbacks()
     print("TELEGRAM APPROVAL BOT READY | Ctrl+C ile durdur")
-    offset = None
     while True:
         data = {"timeout": 30, "allowed_updates": '["callback_query"]'}
         if offset is not None:
