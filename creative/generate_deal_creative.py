@@ -2,7 +2,6 @@ import argparse
 import io
 import json
 import os
-import textwrap
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -12,12 +11,12 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 OUT_DIR = Path(os.getenv("CREATIVE_OUTPUT_DIR", "creative_output"))
+
 FORMATS = {
     "instagram": (1080, 1350),
     "story": (1080, 1920),
     "site": (1200, 675),
 }
-W, H = FORMATS["instagram"]
 
 NAVY = (8, 24, 58)
 NAVY_2 = (18, 31, 82)
@@ -25,15 +24,13 @@ ORANGE = (249, 115, 22)
 WHITE = (248, 250, 252)
 MUTED = (183, 194, 218)
 CARD = (16, 34, 75)
+SOFT_WHITE = (255, 255, 255)
 
 
 def api_headers():
     if not SUPABASE_SERVICE_ROLE_KEY:
         raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY tanimli degil")
-    return {
-        "apikey": SUPABASE_SERVICE_ROLE_KEY,
-        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-    }
+    return {"apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}"}
 
 
 def sb_get(table, params):
@@ -55,7 +52,6 @@ def load_candidate(candidate_id=None):
     if not rows:
         raise RuntimeError("Uygun deal_candidate bulunamadi")
     dc = rows[0]
-
     product = sb_get("canonical_products", {"select": "id,brand,title", "id": f"eq.{dc['canonical_product_id']}", "limit": "1"})[0]
     offer = sb_get("offers", {"select": "id,image_url,product_url", "id": f"eq.{dc['cheapest_offer_id']}", "limit": "1"})[0]
     merchant = sb_get("merchants", {"select": "id,name", "id": f"eq.{dc['cheapest_merchant_id']}", "limit": "1"})[0]
@@ -74,6 +70,8 @@ def font(size, bold=False):
 
 
 def download_image(url):
+    if not url:
+        raise RuntimeError("offers.image_url bos")
     req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urlopen(req, timeout=45) as resp:
         return Image.open(io.BytesIO(resp.read())).convert("RGBA")
@@ -87,13 +85,23 @@ def money(value):
     return s + " TL"
 
 
-def fit_title(draw, title, max_width=920, max_lines=3):
-    f = font(50, True)
-    words = title.split()
+def gradient_canvas(size):
+    w, h = size
+    canvas = Image.new("RGB", size, NAVY)
+    draw = ImageDraw.Draw(canvas)
+    for y in range(h):
+        t = y / max(h - 1, 1)
+        color = tuple(int(NAVY[i] * (1 - t) + NAVY_2[i] * t) for i in range(3))
+        draw.line((0, y, w, y), fill=color)
+    return canvas, draw
+
+
+def wrap_lines(draw, text, fnt, max_width, max_lines=3):
+    words = str(text).split()
     lines, current = [], ""
     for word in words:
         trial = (current + " " + word).strip()
-        if draw.textbbox((0, 0), trial, font=f)[2] <= max_width:
+        if draw.textbbox((0, 0), trial, font=fnt)[2] <= max_width:
             current = trial
         else:
             if current:
@@ -101,84 +109,182 @@ def fit_title(draw, title, max_width=920, max_lines=3):
             current = word
     if current:
         lines.append(current)
-    lines = lines[:max_lines]
-    if len(lines) == max_lines and " ".join(lines) != title:
-        lines[-1] = textwrap.shorten(lines[-1], width=max(10, len(lines[-1]) - 3), placeholder="...")
-    return lines, f
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        while lines[-1] and draw.textbbox((0, 0), lines[-1] + "...", font=fnt)[2] > max_width:
+            lines[-1] = lines[-1][:-1].rstrip()
+        lines[-1] += "..."
+    return lines
 
 
-def render(data, output_path):
-    canvas = Image.new("RGB", (W, H), NAVY)
-    draw = ImageDraw.Draw(canvas)
-    # deterministic vertical gradient
-    for y in range(H):
-        t = y / H
-        color = tuple(int(NAVY[i] * (1 - t) + NAVY_2[i] * t) for i in range(3))
-        draw.line((0, y, W, y), fill=color)
+def draw_logo(draw, x, y, scale=1.0):
+    # Asset-free V2 mark: orange price-tag frame + explicit downward arrow.
+    s = scale
+    box = (x, y, x + int(58*s), y + int(58*s))
+    draw.rounded_rectangle(box, radius=int(14*s), outline=ORANGE, width=max(3, int(4*s)))
+    cx = x + int(29*s)
+    draw.line((cx, y + int(13*s), cx, y + int(37*s)), fill=ORANGE, width=max(3, int(5*s)))
+    draw.polygon([
+        (cx - int(10*s), y + int(31*s)),
+        (cx + int(10*s), y + int(31*s)),
+        (cx, y + int(44*s)),
+    ], fill=ORANGE)
+    draw.text((x + int(76*s), y + int(5*s)), "FİYATZADE", font=font(max(18, int(36*s)), True), fill=WHITE)
 
-    draw.rounded_rectangle((55, 45, 1025, 125), 30, fill=CARD)
-    draw.text((85, 66), "FIYATZADE", font=font(38, True), fill=WHITE)
-    draw.text((330, 76), "Fiyatı biz takip ederiz.", font=font(25), fill=MUTED)
 
-    brand = (data.get("brand") or "FIRSAT").upper()
-    draw.text((70, 165), brand, font=font(32, True), fill=ORANGE)
-    lines, title_font = fit_title(draw, data["title"])
-    y = 210
-    for line in lines:
-        draw.text((70, y), line, font=title_font, fill=WHITE)
-        y += 58
+def draw_product_card(canvas, product, box):
+    x1, y1, x2, y2 = box
+    w, h = x2-x1, y2-y1
+    panel = Image.new("RGBA", (w, h), SOFT_WHITE + (255,))
+    fitted = ImageOps.contain(product, (int(w*0.88), int(h*0.88)))
+    panel.alpha_composite(fitted, ((w-fitted.width)//2, (h-fitted.height)//2))
+    canvas.paste(panel.convert("RGB"), (x1, y1))
 
-    product = download_image(data["image_url"])
-    product = ImageOps.contain(product, (470, 560))
-    product_bg = Image.new("RGBA", (510, 600), (255, 255, 255, 255))
-    px = (510 - product.width) // 2
-    py = (600 - product.height) // 2
-    product_bg.alpha_composite(product, (px, py))
-    canvas.paste(product_bg.convert("RGB"), (55, 405))
 
-    draw.rounded_rectangle((595, 405, 1025, 1005), 32, fill=CARD)
-    draw.text((635, 450), "RAKİP FİYAT", font=font(27, True), fill=MUTED)
-    old = money(data["competitor_price"])
-    draw.text((635, 495), old, font=font(43, True), fill=WHITE)
-    old_box = draw.textbbox((635, 495), old, font=font(43, True))
-    draw.line((old_box[0], (old_box[1]+old_box[3])//2, old_box[2], (old_box[1]+old_box[3])//2), fill=ORANGE, width=6)
+def draw_old_price(draw, x, y, value, size):
+    fnt = font(size, True)
+    label = money(value)
+    draw.text((x, y), label, font=fnt, fill=WHITE)
+    b = draw.textbbox((x, y), label, font=fnt)
+    cy = (b[1] + b[3]) // 2
+    draw.line((b[0], cy, b[2], cy), fill=ORANGE, width=max(4, size//9))
 
-    draw.text((635, 590), "FIRSAT FİYATI", font=font(27, True), fill=MUTED)
-    draw.text((635, 635), money(data["cheapest_price"]), font=font(55, True), fill=WHITE)
+
+def draw_disclosure(draw, x, y, size=18):
+    draw.text((x, y), "#işbirliği  #reklam", font=font(size), fill=MUTED)
+
+
+def render_instagram(data, product):
+    canvas, draw = gradient_canvas(FORMATS["instagram"])
+    draw_logo(draw, 62, 48, 1.0)
+    draw_disclosure(draw, 790, 65, 18)
+
+    draw.text((64, 150), (data.get("brand") or "FIRSAT").upper(), font=font(30, True), fill=ORANGE)
+    title_f = font(45, True)
+    for i, line in enumerate(wrap_lines(draw, data["title"], title_f, 940, 3)):
+        draw.text((64, 195 + i*52), line, font=title_f, fill=WHITE)
+
+    draw_product_card(canvas, product, (55, 375, 575, 1015))
+    draw.rounded_rectangle((610, 375, 1025, 1015), 30, fill=CARD)
+
+    draw.text((646, 425), "RAKİP FİYAT", font=font(23, True), fill=MUTED)
+    draw_old_price(draw, 646, 462, data["competitor_price"], 38)
+    draw.text((646, 555), "FIRSAT FİYATI", font=font(23, True), fill=MUTED)
+    draw.text((646, 595), money(data["cheapest_price"]), font=font(49, True), fill=WHITE)
 
     gap = float(data["gap_percent"])
-    draw.rounded_rectangle((625, 740, 995, 865), 28, fill=ORANGE)
-    draw.text((665, 758), f"%{gap:.2f}".replace(".", ","), font=font(55, True), fill=WHITE)
-    draw.text((665, 818), "DAHA UCUZ", font=font(25, True), fill=WHITE)
+    draw.rounded_rectangle((640, 710, 995, 835), 26, fill=ORANGE)
+    draw.text((672, 726), f"%{gap:.2f}".replace(".", ","), font=font(48, True), fill=WHITE)
+    draw.text((672, 783), "DAHA UCUZ", font=font(22, True), fill=WHITE)
+    draw.text((646, 895), str(data["merchant"]), font=font(31, True), fill=WHITE)
 
-    draw.text((635, 915), data["merchant"], font=font(34, True), fill=WHITE)
-    draw.text((70, 1060), "FIRSATI YAKALA", font=font(38, True), fill=ORANGE)
-    draw.text((70, 1110), "Fiyatlar değişebilir. Satın alma mağazada tamamlanır.", font=font(24), fill=MUTED)
-
+    draw.text((64, 1070), "FIRSATI YAKALA", font=font(36, True), fill=ORANGE)
+    draw.text((64, 1120), "Fiyatlar değişebilir. Satın alma mağazada tamamlanır.", font=font(22), fill=MUTED)
     if not data.get("verified"):
-        draw.rounded_rectangle((70, 1175, 520, 1235), 20, outline=(104, 123, 166), width=2)
-        draw.text((92, 1190), "Geçmiş fiyat doğrulaması bekleniyor", font=font(20), fill=MUTED)
+        draw.text((64, 1170), "Geçmiş fiyat doğrulaması bekleniyor", font=font(19), fill=MUTED)
+    return canvas
 
-    draw.text((70, 1280), "fiyatzade", font=font(27, True), fill=WHITE)
-    draw.text((790, 1285), "#işbirliği  #reklam", font=font(20), fill=MUTED)
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+def render_story(data, product):
+    canvas, draw = gradient_canvas(FORMATS["story"])
+    draw_logo(draw, 64, 58, 1.05)
+    draw_disclosure(draw, 790, 76, 18)
+
+    draw.text((64, 175), (data.get("brand") or "FIRSAT").upper(), font=font(32, True), fill=ORANGE)
+    title_f = font(48, True)
+    for i, line in enumerate(wrap_lines(draw, data["title"], title_f, 950, 3)):
+        draw.text((64, 225 + i*56), line, font=title_f, fill=WHITE)
+
+    draw_product_card(canvas, product, (75, 430, 1005, 1130))
+    draw.rounded_rectangle((75, 1170, 1005, 1580), 34, fill=CARD)
+
+    draw.text((120, 1220), "RAKİP FİYAT", font=font(24, True), fill=MUTED)
+    draw_old_price(draw, 120, 1260, data["competitor_price"], 38)
+    draw.text((120, 1350), "FIRSAT FİYATI", font=font(24, True), fill=MUTED)
+    draw.text((120, 1390), money(data["cheapest_price"]), font=font(54, True), fill=WHITE)
+
+    gap = float(data["gap_percent"])
+    draw.rounded_rectangle((625, 1230, 950, 1435), 28, fill=ORANGE)
+    draw.text((660, 1260), f"%{gap:.2f}".replace(".", ","), font=font(50, True), fill=WHITE)
+    draw.text((660, 1325), "DAHA UCUZ", font=font(24, True), fill=WHITE)
+    draw.text((625, 1490), str(data["merchant"]), font=font(30, True), fill=WHITE)
+
+    draw.text((75, 1640), "FIRSATI YAKALA", font=font(40, True), fill=ORANGE)
+    draw.text((75, 1695), "Fiyatlar değişebilir. Satın alma mağazada tamamlanır.", font=font(22), fill=MUTED)
+    if not data.get("verified"):
+        draw.text((75, 1745), "Geçmiş fiyat doğrulaması bekleniyor", font=font(19), fill=MUTED)
+    return canvas
+
+
+def render_site(data, product):
+    canvas, draw = gradient_canvas(FORMATS["site"])
+    draw_logo(draw, 48, 30, 0.82)
+    draw_disclosure(draw, 990, 47, 16)
+
+    draw.text((48, 112), (data.get("brand") or "FIRSAT").upper(), font=font(23, True), fill=ORANGE)
+    title_f = font(31, True)
+    for i, line in enumerate(wrap_lines(draw, data["title"], title_f, 1080, 2)):
+        draw.text((48, 145 + i*37), line, font=title_f, fill=WHITE)
+
+    draw_product_card(canvas, product, (48, 230, 510, 610))
+    draw.rounded_rectangle((545, 230, 1152, 610), 28, fill=CARD)
+
+    draw.text((585, 270), "RAKİP FİYAT", font=font(19, True), fill=MUTED)
+    draw_old_price(draw, 585, 302, data["competitor_price"], 31)
+    draw.text((585, 370), "FIRSAT FİYATI", font=font(19, True), fill=MUTED)
+    draw.text((585, 403), money(data["cheapest_price"]), font=font(43, True), fill=WHITE)
+
+    gap = float(data["gap_percent"])
+    draw.rounded_rectangle((900, 275, 1115, 410), 24, fill=ORANGE)
+    draw.text((928, 292), f"%{gap:.2f}".replace(".", ","), font=font(37, True), fill=WHITE)
+    draw.text((928, 340), "DAHA UCUZ", font=font(18, True), fill=WHITE)
+
+    draw.text((585, 490), str(data["merchant"]), font=font(27, True), fill=WHITE)
+    draw.text((585, 540), "FIRSATI YAKALA", font=font(27, True), fill=ORANGE)
+    draw.text((585, 575), "Fiyatlar değişebilir. Satın alma mağazada tamamlanır.", font=font(16), fill=MUTED)
+    return canvas
+
+
+RENDERERS = {
+    "instagram": render_instagram,
+    "story": render_story,
+    "site": render_site,
+}
+
+
+def render(data, output_path, format_name="instagram"):
+    if format_name not in RENDERERS:
+        raise ValueError(f"Bilinmeyen format: {format_name}")
+    product = download_image(data["image_url"])
+    canvas = RENDERERS[format_name](data, product)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(output_path, "PNG", optimize=True)
     return output_path
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Fiyatzade deal creative generator")
+    parser = argparse.ArgumentParser(description="Fiyatzade Creative Generator V2")
     parser.add_argument("--candidate-id")
     parser.add_argument("--output")
     parser.add_argument("--format", choices=FORMATS.keys(), default="instagram")
+    parser.add_argument("--all-formats", action="store_true")
     args = parser.parse_args()
 
     data = load_candidate(args.candidate_id)
-    width, height = FORMATS[args.format]
-    output = Path(args.output) if args.output else OUT_DIR / f"deal_{data['id']}_{args.format}_{width}x{height}.png"
-    render(data, output)
-    print(f"CREATIVE OK | {output}")
+    selected = list(FORMATS) if args.all_formats else [args.format]
+    outputs = []
+    for format_name in selected:
+        width, height = FORMATS[format_name]
+        output = (
+            Path(args.output)
+            if args.output and len(selected) == 1
+            else OUT_DIR / f"deal_{data['id']}_{format_name}_{width}x{height}.png"
+        )
+        render(data, output, format_name)
+        outputs.append(output)
+        print(f"CREATIVE OK | {format_name} | {output}")
+
     print(f"{data['title']} | {money(data['cheapest_price'])} | %{float(data['gap_percent']):.2f} | {data['merchant']}")
 
 
