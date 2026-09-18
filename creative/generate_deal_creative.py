@@ -110,12 +110,17 @@ def light_canvas(size):
 
 
 def draw_brand(draw, x, y, scale=1.0):
-    # Uses the supplied logo asset when it exists; this fallback preserves brand colors.
-    draw.rounded_rectangle((x, y, x+int(62*scale), y+int(62*scale)), int(14*scale), fill=NAVY)
-    draw.polygon([(x+int(18*scale), y+int(22*scale)), (x+int(44*scale), y+int(18*scale)),
-                  (x+int(47*scale), y+int(42*scale)), (x+int(29*scale), y+int(48*scale))], fill=WHITE)
-    draw.line((x+int(31*scale), y+int(27*scale), x+int(36*scale), y+int(40*scale)), fill=ORANGE, width=max(3,int(5*scale)))
-    draw.text((x+int(78*scale), y+int(7*scale)), "FİYATZADE", font=font(max(18,int(38*scale)), True), fill=NAVY)
+    # Faithful compact fallback for the supplied square Fiyatzade mark.
+    s = scale
+    side = int(70*s)
+    draw.rounded_rectangle((x, y, x+side, y+side), int(10*s), fill=NAVY_DARK)
+    # White tilted price tag.
+    tag = [(x+int(18*s),y+int(25*s)),(x+int(42*s),y+int(18*s)),
+           (x+int(52*s),y+int(47*s)),(x+int(27*s),y+int(54*s))]
+    draw.polygon(tag, fill=WHITE)
+    # Orange falling-price arrow inside the tag.
+    draw.line((x+int(32*s),y+int(30*s),x+int(38*s),y+int(43*s)),fill=ORANGE,width=max(3,int(5*s)))
+    draw.polygon([(x+int(33*s),y+int(42*s)),(x+int(45*s),y+int(39*s)),(x+int(40*s),y+int(50*s))],fill=ORANGE)
 
 
 def paste_logo_asset(canvas, x, y, max_size):
@@ -194,38 +199,28 @@ def draw_footer(draw, y, width, size=17):
 def render_instagram(data, product):
     canvas,draw=light_canvas(FORMATS["instagram"])
     draw_header(canvas,draw,55,42,(88,88),805,62,17)
-    # Wordmark is separate from the supplied square logo asset.
-    if LOGO_PATH.exists() or any((ASSET_DIR / n).exists() for n in ("fiyatzade_logo.jpg","fiyatzade_logo.jpeg","fiyatzade_logo.png")):
-        draw.text((158,58),"FİYATZADE",font=font(36,True),fill=NAVY)
     draw.text((58,155),(data.get("brand") or "FIRSAT").upper(),font=font(28,True),fill=ORANGE)
     tf=font(43,True)
     for i,line in enumerate(wrap_lines(draw,data["title"],tf,920,3)):
         draw.text((58,195+i*50),line,font=tf,fill=NAVY_DARK)
 
     # V2.2: product is the hero; pricing is a large supporting block.
-    product_panel(canvas,draw,product,(355,335,1025,1035))
+    product_panel(canvas,draw,product,(355,335,1025,1015))
     discount_badge(draw,(715,285,1020,430),data["gap_percent"],50,21)
 
-    # V2.4: strict two-column grid. Nothing from the left column may enter the product card.
-    discount_badge(draw,(55,350,330,500),data["gap_percent"],46,20)
-    merchant_badge(draw,(55,525,330,620),data["merchant"])
+    price_card(draw,(55,510,330,785),data,1.05)
+    merchant_badge(draw,(55,805,330,900),data["merchant"])
 
-    # Price moves to the former CTA zone and gets the strongest text hierarchy.
-    price_card(draw,(55,690,330,965),data,1.05)
-
-    # CTA belongs to the product column, directly below the product.
-    draw.rounded_rectangle((430,1060,1018,1155),46,fill=ORANGE)
-    draw.text((545,1082),"FIRSATI YAKALA  →",font=font(31,True),fill=WHITE)
-    draw.text((430,1175),"Fiyatlar değişebilir. Satın alma mağazada tamamlanır.",font=font(17),fill=MUTED)
-    if not data.get("verified"):
-        draw.text((55,1000),"Fiyat geçmişi kontrol ediliyor",font=font(15),fill=MUTED)
+    draw.rounded_rectangle((430,1040,1018,1135),46,fill=ORANGE)
+    draw.text((545,1062),"FIRSATI YAKALA  →",font=font(31,True),fill=WHITE)
+    draw.text((430,1155),"Fiyatlar değişebilir. Satın alma mağazada tamamlanır.",font=font(17),fill=MUTED)
     draw_footer(draw,1235,1080,15)
     return canvas
 
 
 def render_story(data, product):
     canvas,draw=light_canvas(FORMATS["story"])
-    draw_header(canvas,draw,60,55,(300,92),800,75,17)
+    draw_header(canvas,draw,60,55,(92,92),800,75,17)
     draw.text((60,180),(data.get("brand") or "FIRSAT").upper(),font=font(31,True),fill=ORANGE)
     tf=font(48,True)
     for i,line in enumerate(wrap_lines(draw,data["title"],tf,930,3)):
@@ -233,33 +228,35 @@ def render_story(data, product):
 
     product_panel(canvas,draw,product,(100,405,980,1195))
     discount_badge(draw,(655,360,985,515),data["gap_percent"],52,23)
-    price_card(draw,(70,1240,590,1550),data,1.16)
-    merchant_badge(draw,(620,1240,1010,1375),data["merchant"])
-    draw.rounded_rectangle((620,1410,1010,1525),48,fill=ORANGE)
-    draw.text((656,1438),"FIRSATI YAKALA →",font=font(27,True),fill=WHITE)
-    draw.text((70,1545),"Fiyatlar değişebilir. Satın alma mağazada tamamlanır.",font=font(20),fill=MUTED)
-    if not data.get("verified"):
-        draw.text((70,1590),"Geçmiş fiyat doğrulaması bekleniyor",font=font(17),fill=MUTED)
+
+    # Balanced lower row: equal visual weight for price and merchant/CTA.
+    price_card(draw,(70,1240,570,1515),data,1.08)
+    merchant_badge(draw,(600,1240,1010,1350),data["merchant"])
+    draw.rounded_rectangle((600,1380,1010,1495),48,fill=ORANGE)
+    draw.text((638,1408),"FIRSATI YAKALA →",font=font(27,True),fill=WHITE)
+
+    draw.text((70,1555),"Fiyatlar değişebilir. Satın alma mağazada tamamlanır.",font=font(19),fill=MUTED)
     draw_footer(draw,1710,1080,15)
     return canvas
 
 
 def render_site(data, product):
     canvas,draw=light_canvas(FORMATS["site"])
-    draw_header(canvas,draw,42,28,(245,70),990,45,15)
+    draw_header(canvas,draw,42,28,(70,70),1030,45,15)
     draw.text((45,108),(data.get("brand") or "FIRSAT").upper(),font=font(21,True),fill=ORANGE)
     tf=font(29,True)
     for i,line in enumerate(wrap_lines(draw,data["title"],tf,520,3)):
         draw.text((45,140+i*35),line,font=tf,fill=NAVY_DARK)
 
-    product_panel(canvas,draw,product,(455,120,875,605))
+    product_panel(canvas,draw,product,(455,120,875,590))
     discount_badge(draw,(835,110,1148,245),data["gap_percent"],43,19)
-    price_card(draw,(45,315,425,555),data,.90)
-    merchant_badge(draw,(865,275,1150,350),data["merchant"])
-    draw.rounded_rectangle((875,365,1145,435),32,fill=ORANGE)
-    draw.text((910,383),"FIRSATI YAKALA →",font=font(19,True),fill=WHITE)
-    draw.text((875,460),"Fiyatlar değişebilir.",font=font(15),fill=MUTED)
-    draw.text((875,482),"Satın alma mağazada tamamlanır.",font=font(15),fill=MUTED)
+
+    price_card(draw,(45,300,410,535),data,.88)
+    merchant_badge(draw,(895,285,1150,365),data["merchant"])
+    draw.rounded_rectangle((895,390,1150,465),34,fill=ORANGE)
+    draw.text((923,409),"FIRSATI YAKALA →",font=font(18,True),fill=WHITE)
+    draw.text((895,495),"Fiyatlar değişebilir.",font=font(14),fill=MUTED)
+    draw.text((895,517),"Satın alma mağazada tamamlanır.",font=font(14),fill=MUTED)
     return canvas
 
 
