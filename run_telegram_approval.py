@@ -241,9 +241,19 @@ def poll():
         time.sleep(0.2)
 
 
-def show_chat_ids():
-    """Print chats seen by the bot without exposing the bot token."""
+def show_chat_ids(chat_username=None):
+    """Resolve a public @username or print chats seen by the bot."""
     require_config(require_chat_id=False)
+
+    if chat_username:
+        username = chat_username.strip()
+        if not username.startswith("@"):
+            username = "@" + username
+        chat = api("getChat", data={"chat_id": username}, timeout=15)
+        name = chat.get("title") or chat.get("username") or "-"
+        print(f"CHAT | {name} | CHAT_ID={chat['id']} | TYPE={chat.get('type', '-')}")
+        return
+
     updates = api("getUpdates", data={"timeout": 0}, timeout=15)
     chats = {}
     for update in updates:
@@ -270,11 +280,12 @@ def main():
     parser.add_argument("--send", action="store_true", help="Candidate'lari Telegram onayina gonder")
     parser.add_argument("--listen", action="store_true", help="PAYLAS/REDDET butonlarini dinle")
     parser.add_argument("--get-chat-id", action="store_true", help="Botun gordugu chat ID'lerini listele")
+    parser.add_argument("--chat-username", help="Public Telegram @kullanici adini getChat ile coz")
     parser.add_argument("--candidate-id")
     parser.add_argument("--limit", type=int, default=1)
     args = parser.parse_args()
     if args.get_chat_id:
-        show_chat_ids()
+        show_chat_ids(args.chat_username)
         return
     require_config()
 
