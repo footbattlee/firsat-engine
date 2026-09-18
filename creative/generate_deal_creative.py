@@ -139,6 +139,14 @@ def paste_logo_asset(canvas, x, y, max_size):
 def draw_header(canvas, draw, x, y, logo_size, disclosure_x, disclosure_y, disclosure_size):
     if not paste_logo_asset(canvas, x, y, logo_size):
         draw_brand(draw, x, y, logo_size[1]/70)
+
+    # Keep the supplied square mark intact; render the Fiyatzade wordmark beside it.
+    logo_h = logo_size[1]
+    word_size = max(18, int(logo_h * 0.43))
+    word_x = x + logo_h + max(12, int(logo_h * 0.16))
+    word_y = y + max(4, int(logo_h * 0.24))
+    draw.text((word_x, word_y), "FİYATZADE", font=font(word_size, True), fill=NAVY_DARK)
+
     draw.text((disclosure_x, disclosure_y), "#işbirliği  #reklam", font=font(disclosure_size), fill=MUTED)
 
 
