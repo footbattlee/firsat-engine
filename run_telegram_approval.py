@@ -23,11 +23,11 @@ APPROVAL_CHAT_ID = os.getenv("TELEGRAM_APPROVAL_CHAT_ID", "").strip()
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
-def require_config():
+def require_config(require_chat_id=True):
     missing = []
     if not BOT_TOKEN:
         missing.append("TELEGRAM_BOT_TOKEN")
-    if not APPROVAL_CHAT_ID:
+    if require_chat_id and not APPROVAL_CHAT_ID:
         missing.append("TELEGRAM_APPROVAL_CHAT_ID")
     if missing:
         raise RuntimeError(".env eksik: " + ", ".join(missing))
@@ -134,13 +134,41 @@ def poll():
         time.sleep(0.2)
 
 
+def show_chat_ids():
+    """Print chats seen by the bot without exposing the bot token."""
+    require_config(require_chat_id=False)
+    updates = api("getUpdates", data={"timeout": 0}, timeout=15)
+    chats = {}
+    for update in updates:
+        message = update.get("message") or update.get("channel_post") or {}
+        chat = message.get("chat")
+        if chat:
+            chats[str(chat["id"])] = chat
+        callback = update.get("callback_query") or {}
+        callback_chat = (callback.get("message") or {}).get("chat")
+        if callback_chat:
+            chats[str(callback_chat["id"])] = callback_chat
+
+    if not chats:
+        print("CHAT BULUNAMADI | Bota/gruba bir mesaj gonderip tekrar dene.")
+        return
+
+    for chat_id, chat in chats.items():
+        name = chat.get("title") or chat.get("username") or chat.get("first_name") or "-"
+        print(f"CHAT | {name} | CHAT_ID={chat_id} | TYPE={chat.get('type', '-')}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Fiyatzade Telegram approval V1")
     parser.add_argument("--send", action="store_true", help="Candidate'lari Telegram onayina gonder")
     parser.add_argument("--listen", action="store_true", help="PAYLAS/REDDET butonlarini dinle")
+    parser.add_argument("--get-chat-id", action="store_true", help="Botun gordugu chat ID'lerini listele")
     parser.add_argument("--candidate-id")
     parser.add_argument("--limit", type=int, default=1)
     args = parser.parse_args()
+    if args.get_chat_id:
+        show_chat_ids()
+        return
     require_config()
 
     if args.send:
@@ -150,7 +178,7 @@ def main():
     if args.listen:
         poll()
     if not args.send and not args.listen:
-        parser.error("--send veya --listen kullan")
+        parser.error("--send, --listen veya --get-chat-id kullan")
 
 
 if __name__ == "__main__":
