@@ -5,9 +5,6 @@ from urllib.parse import quote
 import requests
 
 GRAPH_BASE = os.getenv("INSTAGRAM_GRAPH_BASE", "https://graph.instagram.com").rstrip("/")
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-BUCKET = os.getenv("INSTAGRAM_MEDIA_BUCKET", "instagram-media").strip()
 
 
 def _token():
@@ -42,17 +39,22 @@ def verify_instagram_user():
 
 
 def upload_public_image(image_path, candidate_id):
-    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+    # Read these lazily: run_telegram_approval loads .env after importing
+    # publisher modules, so import-time reads would incorrectly stay empty.
+    supabase_url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+    service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    bucket = os.getenv("INSTAGRAM_MEDIA_BUCKET", "instagram-media").strip()
+    if not supabase_url or not service_role_key:
         raise RuntimeError("Supabase Storage config eksik")
 
     image_path = Path(image_path)
     object_path = f"deals/{candidate_id}/{image_path.name}"
     encoded_path = quote(object_path, safe="/")
     response = requests.post(
-        f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{encoded_path}",
+        f"{supabase_url}/storage/v1/object/{bucket}/{encoded_path}",
         headers={
-            "apikey": SUPABASE_SERVICE_ROLE_KEY,
-            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "apikey": service_role_key,
+            "Authorization": f"Bearer {service_role_key}",
             "Content-Type": "image/png",
             "x-upsert": "true",
         },
@@ -60,7 +62,7 @@ def upload_public_image(image_path, candidate_id):
         timeout=90,
     )
     _raise(response, "storage upload")
-    return f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET}/{encoded_path}"
+    return f"{supabase_url}/storage/v1/object/public/{bucket}/{encoded_path}"
 
 
 def create_image_container(image_url, caption):
