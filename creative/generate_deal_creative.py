@@ -55,11 +55,15 @@ def _one(table, params, label):
 def load_candidates(limit=1, candidate_id=None):
     params = {
         "select": "id,canonical_product_id,cheapest_offer_id,cheapest_merchant_id,cheapest_price,competitor_price,gap_percent,verified,history_status",
-        "status": "eq.candidate", "order": "gap_percent.desc", "limit": str(limit),
+        "order": "gap_percent.desc", "limit": str(limit),
     }
     if candidate_id:
+        # Explicit IDs are useful for reruns/debugging even if the deal engine
+        # changed the candidate status after a previous batch.
         params["id"] = f"eq.{candidate_id}"
         params["limit"] = "1"
+    else:
+        params["status"] = "eq.candidate"
     rows = sb_get("deal_candidates", params)
     if not rows:
         raise RuntimeError("Uygun deal_candidate bulunamadi")
