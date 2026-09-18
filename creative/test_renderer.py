@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from creative.generate_deal_creative import render
+from creative.generate_deal_creative import FORMATS, render
 
 
 SAMPLE = {
@@ -14,27 +14,37 @@ SAMPLE = {
     "gap_percent": "45.57",
     "merchant": "Hepsiburada",
     "verified": False,
+    # Smoke-test URL is only a network/render fixture. Live creatives always use offers.image_url.
     "image_url": "https://productimages.hepsiburada.net/s/777/375/110001089901345.jpg/format:webp",
 }
 
 
-def main():
-    output = Path("creative_output") / "stanley_smoke_test.png"
-    if output.exists():
-        output.unlink()
-
-    render(SAMPLE, output)
-    assert output.exists(), "PNG olusturulamadi"
-    assert output.stat().st_size > 10_000, "PNG beklenenden kucuk"
-
-    with Image.open(output) as image:
+def verify_png(path, expected_size):
+    assert path.exists(), f"PNG olusturulamadi: {path}"
+    assert path.stat().st_size > 10_000, f"PNG beklenenden kucuk: {path}"
+    with Image.open(path) as image:
         assert image.format == "PNG", f"Beklenen PNG, gelen: {image.format}"
-        assert image.size == (1080, 1350), f"Yanlis boyut: {image.size}"
+        assert image.size == expected_size, f"Yanlis boyut: {image.size}, beklenen: {expected_size}"
         image.verify()
+    assert path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n", "Gecersiz PNG signature"
 
-    signature = output.read_bytes()[:8]
-    assert signature == b"\x89PNG\r\n\x1a\n", f"Gecersiz PNG signature: {signature!r}"
-    print(f"SMOKE TEST OK | {output.resolve()} | {output.stat().st_size} bytes | PNG 1080x1350 VERIFIED")
+
+def main():
+    outputs = {
+        "instagram": Path("creative_output") / "stanley_smoke_test.png",
+        "story": Path("creative_output") / "stanley_smoke_test_story.png",
+        "site": Path("creative_output") / "stanley_smoke_test_site.png",
+    }
+
+    for format_name, output in outputs.items():
+        if output.exists():
+            output.unlink()
+        render(SAMPLE, output, format_name)
+        verify_png(output, FORMATS[format_name])
+        print(
+            f"SMOKE TEST OK | {format_name} | {output.resolve()} | "
+            f"{output.stat().st_size} bytes | PNG {FORMATS[format_name][0]}x{FORMATS[format_name][1]} VERIFIED"
+        )
 
 
 if __name__ == "__main__":
