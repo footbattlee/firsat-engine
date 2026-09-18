@@ -7,8 +7,12 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFile
+from dotenv import load_dotenv
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+# Load local secrets/config from the project root without committing them.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
