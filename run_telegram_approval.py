@@ -10,6 +10,9 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
+ROOT = Path(__file__).resolve().parent
+load_dotenv(ROOT / ".env")
+
 from creative.generate_deal_creative import (
     load_candidates,
     money,
@@ -20,17 +23,6 @@ from creative.generate_deal_creative import (
 
 from publishers.x_publisher import publish_x_post
 from publishers.instagram_publisher import publish_instagram_post
-
-
-    load_candidates,
-    money,
-    output_path_for,
-    render_candidate_bundle,
-    validate_candidate,
-)
-
-ROOT = Path(__file__).resolve().parent
-load_dotenv(ROOT / ".env")
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 APPROVAL_CHAT_ID = os.getenv("TELEGRAM_APPROVAL_CHAT_ID", "").strip()
