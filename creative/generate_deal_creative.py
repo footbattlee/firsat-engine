@@ -2,6 +2,7 @@ import argparse
 import io
 import json
 import os
+import re
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -91,6 +92,58 @@ def load_candidates(limit=1, candidate_id=None):
 
 def load_candidate(candidate_id=None):
     return load_candidates(1, candidate_id)[0]
+
+
+def _norm(value):
+    text = str(value or "").casefold()
+    return re.sub(r"[^a-z0-9çğıöşü]+", " ", text).strip()
+
+
+def validate_candidate(data, gap_tolerance=0.35):
+    """Validation Gate V1: product match, price math, image, merchant and product URL."""
+    errors = []
+
+    title = _norm(data.get("title"))
+    brand = _norm(data.get("brand"))
+    if not title:
+        errors.append("PRODUCT_TITLE_MISSING")
+    elif brand and brand not in title:
+        errors.append(f"PRODUCT_MATCH_SUSPECT: brand={data.get('brand')}")
+
+    try:
+        cheapest = float(data.get("cheapest_price"))
+        competitor = float(data.get("competitor_price"))
+        stored_gap = float(data.get("gap_percent"))
+        if cheapest <= 0 or competitor <= 0 or cheapest >= competitor:
+            errors.append("PRICE_ORDER_INVALID")
+        else:
+            calculated_gap = ((competitor - cheapest) / competitor) * 100
+            if abs(calculated_gap - stored_gap) > gap_tolerance:
+                errors.append(
+                    f"PRICE_GAP_MISMATCH: stored={stored_gap:.2f} calculated={calculated_gap:.2f}"
+                )
+    except (TypeError, ValueError):
+        errors.append("PRICE_DATA_INVALID")
+
+    merchant = str(data.get("merchant") or "").strip()
+    if not merchant:
+        errors.append("MERCHANT_MISSING")
+
+    product_url = str(data.get("product_url") or "").strip()
+    if not product_url.startswith(("http://", "https://")):
+        errors.append("PRODUCT_URL_INVALID")
+
+    image_url = str(data.get("image_url") or "").strip()
+    if not image_url.startswith(("http://", "https://")):
+        errors.append("IMAGE_URL_INVALID")
+    else:
+        try:
+            image = download_image(image_url)
+            image.verify()
+        except Exception as exc:
+            errors.append(f"IMAGE_UNAVAILABLE: {type(exc).__name__}")
+
+    return {"ok": not errors, "errors": errors}
 
 
 def font(size, bold=False):
@@ -375,6 +428,13 @@ def main():
     failed = 0
     for index, data in enumerate(candidates, 1):
         try:
+            validation = validate_candidate(data)
+            if not validation["ok"]:
+                failed += 1
+                print(f"VALIDATION FAILED | {index}/{len(candidates)} | {data['id']} | " + " | ".join(validation["errors"]))
+                continue
+            print(f"VALIDATION OK | {index}/{len(candidates)} | {data['id']}")
+
             if args.all_formats:
                 outputs = render_candidate_bundle(data)
                 for format_name, output in outputs.items():
