@@ -133,6 +133,20 @@ def draw_header(canvas, draw, x, y, logo_size, disclosure_x, disclosure_y, discl
     draw.text((disclosure_x, disclosure_y), "#işbirliği  #reklam", font=font(disclosure_size), fill=MUTED)
 
 
+def merchant_badge(draw, box, merchant):
+    x1, y1, x2, y2 = box
+    draw.rounded_rectangle(box, 22, fill=WHITE, outline=LINE, width=2)
+    name = str(merchant or "").strip()
+    key = name.lower().replace("ı", "i")
+    if "hepsiburada" in key:
+        icon = (x1+22, y1+15, x1+78, y2-15)
+        draw.rounded_rectangle(icon, 12, fill=ORANGE)
+        draw.text((x1+31, y1+23), "hb", font=font(25, True), fill=WHITE)
+        draw.text((x1+96, y1+25), "Hepsiburada", font=font(26, True), fill=NAVY_DARK)
+    else:
+        draw.text((x1+26, y1+25), name, font=font(26, True), fill=NAVY_DARK)
+
+
 def product_panel(canvas, draw, product, box):
     x1,y1,x2,y2 = box
     draw.rounded_rectangle(box, 34, fill=WHITE, outline=LINE, width=2)
@@ -185,16 +199,18 @@ def render_instagram(data, product):
     product_panel(canvas,draw,product,(355,335,1025,1035))
     discount_badge(draw,(715,285,1020,430),data["gap_percent"],50,21)
 
-    price_card(draw,(55,600,380,900),data,1.12)
-    draw.rounded_rectangle((55,920,380,1005),22,fill=WHITE,outline=LINE,width=2)
-    draw.text((82,943),str(data["merchant"]),font=font(29,True),fill=NAVY_DARK)
+    # Price starts directly below the title: no dead upper-left area.
+    price_card(draw,(55,350,385,665),data,1.18)
+    merchant_badge(draw,(55,685,385,780),data["merchant"])
 
-    draw.rounded_rectangle((475,1065,1018,1160),46,fill=ORANGE)
-    draw.text((560,1087),"FIRSATI YAKALA  →",font=font(32,True),fill=WHITE)
-    draw.text((475,1180),"Fiyatlar değişebilir. Satın alma mağazada tamamlanır.",font=font(18),fill=MUTED)
+    draw.rounded_rectangle((55,825,385,920),42,fill=ORANGE)
+    draw.text((88,850),"FIRSATI YAKALA →",font=font(24,True),fill=WHITE)
+
+    draw.text((55,970),"Fiyatlar değişebilir.",font=font(17),fill=MUTED)
+    draw.text((55,998),"Satın alma mağazada tamamlanır.",font=font(17),fill=MUTED)
     if not data.get("verified"):
-        draw.text((55,1045),"Geçmiş fiyat doğrulaması bekleniyor",font=font(16),fill=MUTED)
-    draw_footer(draw,1240,1080,15)
+        draw.text((55,1040),"Fiyat geçmişi kontrol ediliyor",font=font(15),fill=MUTED)
+    draw_footer(draw,1235,1080,15)
     return canvas
 
 
@@ -209,8 +225,7 @@ def render_story(data, product):
     product_panel(canvas,draw,product,(100,405,980,1195))
     discount_badge(draw,(655,360,985,515),data["gap_percent"],52,23)
     price_card(draw,(70,1240,590,1550),data,1.16)
-    draw.rounded_rectangle((620,1240,1010,1375),28,fill=WHITE,outline=LINE,width=2)
-    draw.text((652,1282),str(data["merchant"]),font=font(30,True),fill=NAVY_DARK)
+    merchant_badge(draw,(620,1240,1010,1375),data["merchant"])
     draw.rounded_rectangle((620,1410,1010,1525),48,fill=ORANGE)
     draw.text((656,1438),"FIRSATI YAKALA →",font=font(27,True),fill=WHITE)
     draw.text((70,1545),"Fiyatlar değişebilir. Satın alma mağazada tamamlanır.",font=font(20),fill=MUTED)
@@ -231,7 +246,7 @@ def render_site(data, product):
     product_panel(canvas,draw,product,(455,120,875,605))
     discount_badge(draw,(835,110,1148,245),data["gap_percent"],43,19)
     price_card(draw,(45,315,425,555),data,.90)
-    draw.text((875,315),str(data["merchant"]),font=font(25,True),fill=NAVY_DARK)
+    merchant_badge(draw,(865,275,1150,350),data["merchant"])
     draw.rounded_rectangle((875,365,1145,435),32,fill=ORANGE)
     draw.text((910,383),"FIRSATI YAKALA →",font=font(19,True),fill=WHITE)
     draw.text((875,460),"Fiyatlar değişebilir.",font=font(15),fill=MUTED)
