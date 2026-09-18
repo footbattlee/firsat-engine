@@ -55,10 +55,9 @@ def caption(data, validation):
         f"🛒 Mağaza: {html.escape(str(data['merchant']))}\n"
         f"💸 Rakip fiyat: <s>{html.escape(money(data['competitor_price']))}</s>\n"
         f"🔥 Fırsat fiyatı: <b>{html.escape(money(data['cheapest_price']))}</b>\n"
-        f"📉 <b>%{float(data['gap_percent']):.2f} daha ucuz</b>"
+        f"📉 <b>%{float(data['gap_percent']):.2f}".replace(".", ",") + " daha ucuz</b>"
         f"{warning}\n\n"
-        f"🔗 <a href=\"{html.escape(str(data['product_url']), quote=True)}\">Ürüne Git</a>\n"
-        f"<code>{html.escape(str(data['id']))}</code>"
+        f"🔗 <a href=\"{html.escape(str(data['product_url']), quote=True)}\">Ürüne Git</a>"
     )
 
 
