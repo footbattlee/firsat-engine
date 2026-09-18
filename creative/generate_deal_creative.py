@@ -229,7 +229,15 @@ def price_card(draw, box, data, scale=1.0):
     draw.text((x1+30,y1+28),"RAKİP FİYAT",font=font(int(18*scale),True),fill=MUTED)
     old_price(draw,x1+30,y1+55,data["competitor_price"],int(30*scale))
     draw.text((x1+30,y1+112),"FIRSAT FİYATI",font=font(int(18*scale),True),fill=MUTED)
-    draw.text((x1+30,y1+142),money(data["cheapest_price"]),font=font(int(45*scale),True),fill=NAVY_DARK)
+    price_text = money(data["cheapest_price"])
+    price_size = int(45*scale)
+    max_price_width = (x2-x1) - 60
+    while price_size > 24:
+        price_font = font(price_size, True)
+        if draw.textbbox((0, 0), price_text, font=price_font)[2] <= max_price_width:
+            break
+        price_size -= 2
+    draw.text((x1+30,y1+142),price_text,font=font(price_size,True),fill=NAVY_DARK)
 
 
 def draw_footer(draw, y, width, size=17):
