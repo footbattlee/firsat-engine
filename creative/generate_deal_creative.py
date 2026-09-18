@@ -208,8 +208,8 @@ def render_instagram(data, product):
     product_panel(canvas,draw,product,(355,335,1025,1015))
     discount_badge(draw,(715,285,1020,430),data["gap_percent"],50,21)
 
-    price_card(draw,(55,510,330,785),data,1.05)
-    merchant_badge(draw,(55,805,330,900),data["merchant"])
+    price_card(draw,(55,485,340,800),data,1.18)
+    merchant_badge(draw,(55,820,340,915),data["merchant"])
 
     draw.rounded_rectangle((430,1040,1018,1135),46,fill=ORANGE)
     draw.text((545,1062),"FIRSATI YAKALA  →",font=font(31,True),fill=WHITE)
@@ -242,21 +242,22 @@ def render_story(data, product):
 
 def render_site(data, product):
     canvas,draw=light_canvas(FORMATS["site"])
-    draw_header(canvas,draw,42,28,(70,70),1030,45,15)
-    draw.text((45,108),(data.get("brand") or "FIRSAT").upper(),font=font(21,True),fill=ORANGE)
-    tf=font(29,True)
-    for i,line in enumerate(wrap_lines(draw,data["title"],tf,520,3)):
-        draw.text((45,140+i*35),line,font=tf,fill=NAVY_DARK)
+    draw_header(canvas,draw,42,25,(70,70),1030,42,15)
+    draw.text((45,105),(data.get("brand") or "FIRSAT").upper(),font=font(20,True),fill=ORANGE)
+    tf=font(27,True)
+    for i,line in enumerate(wrap_lines(draw,data["title"],tf,360,3)):
+        draw.text((45,136+i*33),line,font=tf,fill=NAVY_DARK)
 
-    product_panel(canvas,draw,product,(455,120,875,590))
-    discount_badge(draw,(835,110,1148,245),data["gap_percent"],43,19)
+    # Site follows the same hierarchy as Story but in three responsive columns.
+    price_card(draw,(45,285,385,525),data,.92)
+    product_panel(canvas,draw,product,(410,125,835,585))
+    discount_badge(draw,(790,105,1148,240),data["gap_percent"],43,19)
 
-    price_card(draw,(45,300,410,535),data,.88)
-    merchant_badge(draw,(895,285,1150,365),data["merchant"])
-    draw.rounded_rectangle((895,390,1150,465),34,fill=ORANGE)
-    draw.text((923,409),"FIRSATI YAKALA →",font=font(18,True),fill=WHITE)
-    draw.text((895,495),"Fiyatlar değişebilir.",font=font(14),fill=MUTED)
-    draw.text((895,517),"Satın alma mağazada tamamlanır.",font=font(14),fill=MUTED)
+    merchant_badge(draw,(865,275,1150,360),data["merchant"])
+    draw.rounded_rectangle((865,385,1150,465),36,fill=ORANGE)
+    draw.text((900,406),"FIRSATI YAKALA →",font=font(19,True),fill=WHITE)
+    draw.text((865,495),"Fiyatlar değişebilir.",font=font(14),fill=MUTED)
+    draw.text((865,517),"Satın alma mağazada tamamlanır.",font=font(14),fill=MUTED)
     return canvas
 
 
