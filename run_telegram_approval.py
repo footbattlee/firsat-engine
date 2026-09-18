@@ -62,6 +62,13 @@ def sb_headers(extra=None):
     return headers
 
 
+def sb_get(table, params):
+    url = f"{SUPABASE_URL}/rest/v1/{table}?" + urlencode(params, safe="(),.*:-+")
+    response = requests.get(url, headers=sb_headers(), timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+
 def sb_patch(table, filters, values):
     url = f"{SUPABASE_URL}/rest/v1/{table}?" + urlencode(filters, safe=".*:-+")
     response = requests.patch(url, headers=sb_headers({"Prefer": "return=minimal"}), json=values, timeout=30)
@@ -136,21 +143,43 @@ def mark_publication(candidate_id, platform, status, *, external_post_id=None, e
     )
 
 
+def publication_state(candidate_id, platform):
+    rows = sb_get(
+        "deal_publications",
+        {
+            "select": "status,external_post_id,published_at",
+            "deal_candidate_id": f"eq.{candidate_id}",
+            "platform": f"eq.{platform}",
+            "limit": "1",
+        },
+    )
+    return rows[0] if rows else None
+
+
 def persist_publish_request(candidate_id):
+    """Create missing platform rows without resetting existing publication state."""
+    existing = sb_get(
+        "deal_publications",
+        {
+            "select": "platform",
+            "deal_candidate_id": f"eq.{candidate_id}",
+        },
+    )
+    existing_platforms = {row["platform"] for row in existing}
+    missing = [platform for platform in PLATFORMS if platform not in existing_platforms]
+    if not missing:
+        return
+
     now = datetime.now(timezone.utc).isoformat()
     rows = [
         {
             "deal_candidate_id": candidate_id,
             "platform": platform,
             "status": "pending",
-            "external_post_id": None,
-            "error_message": None,
-            "published_at": None,
             "updated_at": now,
         }
-        for platform in PLATFORMS
+        for platform in missing
     ]
-    # Unique(deal_candidate_id, platform) makes repeated PAYLAS presses idempotent.
     sb_upsert("deal_publications", rows, "deal_candidate_id,platform")
 
 
@@ -238,6 +267,13 @@ def handle_callback(query):
     if action == "publish":
         try:
             persist_publish_request(candidate_id)
+            telegram_state = publication_state(candidate_id, "telegram")
+            if telegram_state and telegram_state.get("status") == "published":
+                message_id = telegram_state.get("external_post_id") or "-"
+                answer_callback(callback_id, "Bu fırsat Telegram'da zaten yayınlandı.")
+                print(f"APPROVAL PUBLISH SKIP | {candidate_id} | telegram=already_published | message_id={message_id}")
+                return
+
             data = load_candidate_for_publish(candidate_id)
             try:
                 mark_publication(candidate_id, "telegram", "publishing")
