@@ -102,13 +102,14 @@ def _norm(value):
 def validate_candidate(data, gap_tolerance=0.35):
     """Validation Gate V1: product match, price math, image, merchant and product URL."""
     errors = []
+    warnings = []
 
     title = _norm(data.get("title"))
     brand = _norm(data.get("brand"))
     if not title:
         errors.append("PRODUCT_TITLE_MISSING")
     elif brand and brand not in title:
-        errors.append(f"PRODUCT_MATCH_SUSPECT: brand={data.get('brand')}")
+        warnings.append(f"PRODUCT_MATCH_SUSPECT: brand={data.get('brand')}")
 
     try:
         cheapest = float(data.get("cheapest_price"))
@@ -143,7 +144,7 @@ def validate_candidate(data, gap_tolerance=0.35):
         except Exception as exc:
             errors.append(f"IMAGE_UNAVAILABLE: {type(exc).__name__}")
 
-    return {"ok": not errors, "errors": errors}
+    return {"ok": not errors, "errors": errors, "warnings": warnings}
 
 
 def font(size, bold=False):
@@ -433,7 +434,10 @@ def main():
                 failed += 1
                 print(f"VALIDATION FAILED | {index}/{len(candidates)} | {data['id']} | " + " | ".join(validation["errors"]))
                 continue
-            print(f"VALIDATION OK | {index}/{len(candidates)} | {data['id']}")
+            if validation["warnings"]:
+                print(f"VALIDATION WARNING | {index}/{len(candidates)} | {data['id']} | " + " | ".join(validation["warnings"]))
+            else:
+                print(f"VALIDATION OK | {index}/{len(candidates)} | {data['id']}")
 
             if args.all_formats:
                 outputs = render_candidate_bundle(data)
