@@ -23,6 +23,7 @@ load_dotenv(ROOT / ".env")
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 APPROVAL_CHAT_ID = os.getenv("TELEGRAM_APPROVAL_CHAT_ID", "").strip()
+PUBLISH_CHAT_ID = os.getenv("TELEGRAM_PUBLISH_CHAT_ID", "").strip()
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
@@ -76,6 +77,63 @@ def sb_upsert(table, rows, on_conflict):
         timeout=30,
     )
     response.raise_for_status()
+
+
+def load_candidate_for_publish(candidate_id):
+    candidates = load_candidates(1, candidate_id)
+    if not candidates:
+        raise RuntimeError("Candidate bulunamadi")
+    return candidates[0]
+
+
+def public_caption(data):
+    return (
+        "🔥 <b>FİYATZADE FIRSATI</b>\n\n"
+        f"<b>{html.escape(str(data['title']))}</b>\n\n"
+        f"🛒 {html.escape(str(data['merchant']))}\n"
+        f"💸 <s>{html.escape(money(data['competitor_price']))}</s>\n"
+        f"🔥 <b>{html.escape(money(data['cheapest_price']))}</b>\n"
+        f"📉 <b>%{float(data['gap_percent']):.2f}".replace(".", ",") + " daha ucuz</b>\n\n"
+        f"🔗 <a href=\"{html.escape(str(data['product_url']), quote=True)}\">Fırsata Git</a>\n\n"
+        "<i>Fiyatlar değişebilir. Satın almadan önce mağaza fiyatını kontrol edin.</i>\n"
+        "#işbirliği #reklam"
+    )
+
+
+def publish_to_telegram(data):
+    if not PUBLISH_CHAT_ID:
+        raise RuntimeError("TELEGRAM_PUBLISH_CHAT_ID tanimli degil")
+
+    outputs = render_candidate_bundle(data)
+    preview = outputs["instagram"]
+    with open(preview, "rb") as image:
+        result = api(
+            "sendPhoto",
+            data={
+                "chat_id": PUBLISH_CHAT_ID,
+                "caption": public_caption(data),
+                "parse_mode": "HTML",
+            },
+            files={"photo": image},
+        )
+    return str(result["message_id"])
+
+
+def mark_publication(candidate_id, platform, status, *, external_post_id=None, error_message=None):
+    now = datetime.now(timezone.utc).isoformat()
+    values = {
+        "status": status,
+        "external_post_id": external_post_id,
+        "error_message": error_message,
+        "updated_at": now,
+    }
+    if status == "published":
+        values["published_at"] = now
+    sb_patch(
+        "deal_publications",
+        {"deal_candidate_id": f"eq.{candidate_id}", "platform": f"eq.{platform}"},
+        values,
+    )
 
 
 def persist_publish_request(candidate_id):
@@ -180,8 +238,27 @@ def handle_callback(query):
     if action == "publish":
         try:
             persist_publish_request(candidate_id)
-            answer_callback(callback_id, "PAYLAŞ alındı. Yayın kuyruğuna eklendi.")
-            print(f"APPROVAL PUBLISH | {candidate_id} | DB=pending")
+            data = load_candidate_for_publish(candidate_id)
+            try:
+                mark_publication(candidate_id, "telegram", "publishing")
+                message_id = publish_to_telegram(data)
+                mark_publication(
+                    candidate_id,
+                    "telegram",
+                    "published",
+                    external_post_id=message_id,
+                )
+                answer_callback(callback_id, "PAYLAŞ alındı. Telegram'da yayınlandı.")
+                print(f"APPROVAL PUBLISH | {candidate_id} | telegram=published | message_id={message_id}")
+            except Exception as publish_exc:
+                mark_publication(
+                    candidate_id,
+                    "telegram",
+                    "failed",
+                    error_message=str(publish_exc)[:1000],
+                )
+                answer_callback(callback_id, "PAYLAŞ alındı. Telegram yayını başarısız.")
+                print(f"TELEGRAM PUBLISH ERROR | {candidate_id} | {publish_exc}")
         except Exception as exc:
             answer_callback(callback_id, "PAYLAŞ kaydedilemedi.")
             print(f"APPROVAL PUBLISH ERROR | {candidate_id} | {exc}")
