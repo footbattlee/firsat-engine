@@ -52,31 +52,41 @@ def _one(table, params, label):
     return rows[0]
 
 
-def load_candidate(candidate_id=None):
+def load_candidates(limit=1, candidate_id=None):
     params = {
         "select": "id,canonical_product_id,cheapest_offer_id,cheapest_merchant_id,cheapest_price,competitor_price,gap_percent,verified,history_status",
-        "status": "eq.candidate", "order": "gap_percent.desc", "limit": "1",
+        "status": "eq.candidate", "order": "gap_percent.desc", "limit": str(limit),
     }
     if candidate_id:
         params["id"] = f"eq.{candidate_id}"
-    dc = _one("deal_candidates", params, "Uygun deal_candidate")
+        params["limit"] = "1"
+    rows = sb_get("deal_candidates", params)
+    if not rows:
+        raise RuntimeError("Uygun deal_candidate bulunamadi")
 
-    product = _one("canonical_products", {
-        "select": "id,brand,title", "id": f"eq.{dc['canonical_product_id']}", "limit": "1"
-    }, "canonical_product")
-    offer = _one("offers", {
-        "select": "id,image_url,product_url", "id": f"eq.{dc['cheapest_offer_id']}", "limit": "1"
-    }, "cheapest_offer")
-    merchant = _one("merchants", {
-        "select": "id,name", "id": f"eq.{dc['cheapest_merchant_id']}", "limit": "1"
-    }, "merchant")
+    candidates = []
+    for dc in rows:
+        product = _one("canonical_products", {
+            "select": "id,brand,title", "id": f"eq.{dc['canonical_product_id']}", "limit": "1"
+        }, "canonical_product")
+        offer = _one("offers", {
+            "select": "id,image_url,product_url", "id": f"eq.{dc['cheapest_offer_id']}", "limit": "1"
+        }, "cheapest_offer")
+        merchant = _one("merchants", {
+            "select": "id,name", "id": f"eq.{dc['cheapest_merchant_id']}", "limit": "1"
+        }, "merchant")
 
-    data = {**dc, **product, **offer, "merchant": merchant["name"]}
-    required = ("title", "image_url", "merchant", "cheapest_price", "competitor_price", "gap_percent")
-    missing = [key for key in required if data.get(key) in (None, "")]
-    if missing:
-        raise RuntimeError("Creative verisi eksik: " + ", ".join(missing))
-    return data
+        data = {**dc, **product, **offer, "merchant": merchant["name"]}
+        required = ("title", "image_url", "merchant", "cheapest_price", "competitor_price", "gap_percent")
+        missing = [key for key in required if data.get(key) in (None, "")]
+        if missing:
+            raise RuntimeError(f"Creative verisi eksik ({dc['id']}): " + ", ".join(missing))
+        candidates.append(data)
+    return candidates
+
+
+def load_candidate(candidate_id=None):
+    return load_candidates(1, candidate_id)[0]
 
 
 def font(size, bold=False):
@@ -324,20 +334,37 @@ def main():
     parser.add_argument("--candidate-id"); parser.add_argument("--output")
     parser.add_argument("--format",choices=FORMATS.keys(),default="instagram")
     parser.add_argument("--all-formats",action="store_true")
+    parser.add_argument("--limit",type=int,default=1,help="En yuksek indirimli N gercek candidate'i isle")
     args=parser.parse_args()
-    data=load_candidate(args.candidate_id)
+    if args.limit < 1:
+        parser.error("--limit 1 veya daha buyuk olmali")
+    if args.candidate_id and args.limit != 1:
+        parser.error("--candidate-id ile --limit birlikte kullanilamaz")
+    if args.output and args.limit != 1:
+        parser.error("--output toplu uretimde kullanilamaz")
 
-    # Production default: a real candidate produces the complete publish bundle.
-    if args.all_formats:
-        outputs = render_candidate_bundle(data)
-        for format_name, output in outputs.items():
-            print(f"CREATIVE OK | {format_name} | {output}")
-    else:
-        output = Path(args.output) if args.output else output_path_for(data, args.format)
-        render(data, output, args.format)
-        print(f"CREATIVE OK | {args.format} | {output}")
+    candidates = load_candidates(args.limit, args.candidate_id)
+    ok = 0
+    failed = 0
+    for index, data in enumerate(candidates, 1):
+        try:
+            if args.all_formats:
+                outputs = render_candidate_bundle(data)
+                for format_name, output in outputs.items():
+                    print(f"CREATIVE OK | {index}/{len(candidates)} | {format_name} | {output}")
+            else:
+                output = Path(args.output) if args.output else output_path_for(data, args.format)
+                render(data, output, args.format)
+                print(f"CREATIVE OK | {index}/{len(candidates)} | {args.format} | {output}")
+            print(f"CANDIDATE | {data['id']} | {data['title']} | {money(data['cheapest_price'])} | %{float(data['gap_percent']):.2f} | {data['merchant']}")
+            ok += 1
+        except Exception as exc:
+            failed += 1
+            print(f"CREATIVE FAIL | {index}/{len(candidates)} | {data['id']} | {exc}")
 
-    print(f"CANDIDATE | {data['id']} | {data['title']} | {money(data['cheapest_price'])} | %{float(data['gap_percent']):.2f} | {data['merchant']}")
+    print(f"BATCH DONE | candidates={len(candidates)} | ok={ok} | failed={failed}")
+    if failed:
+        raise SystemExit(1)
 
 
 if __name__=="__main__":
