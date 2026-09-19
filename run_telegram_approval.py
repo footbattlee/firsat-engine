@@ -524,7 +524,10 @@ def main():
         candidates = load_candidates(args.limit, args.candidate_id)
         sent = sum(1 for item in candidates if send_candidate(item))
         print(f"TELEGRAM BATCH DONE | candidates={len(candidates)} | sent={sent}")
-    if args.dispatch_pending:\n        dispatch_pending_candidates(args.limit)\n    if args.listen:\n        poll()
+    if args.dispatch_pending:
+        dispatch_pending_candidates(args.limit)
+    if args.listen:
+        poll()
     if not args.send and not args.listen and not args.dispatch_pending:
         parser.error("--send, --dispatch-pending, --listen veya --get-chat-id kullan")
 
