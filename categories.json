@@ -1,34 +1,49 @@
 {
-  "version": 1,
+  "version": 2,
   "categories": [
     {
       "name": "Termos / Matara",
       "slug": "termos-matara",
       "active": true,
+      "stores": [
+        "Trendyol",
+        "Hepsiburada",
+        "n11"
+      ],
       "subcategories": [
         {
           "name": "Termos",
           "slug": "termos",
           "active": true,
-          "queries": ["termos"]
+          "queries": [
+            "termos"
+          ]
         },
         {
           "name": "Matara",
           "slug": "matara",
           "active": true,
-          "queries": ["matara"]
+          "queries": [
+            "matara"
+          ]
         },
         {
           "name": "Termos Bardak",
           "slug": "termos-bardak",
           "active": true,
-          "queries": ["termos bardak", "termos kupa"]
+          "queries": [
+            "termos bardak",
+            "termos kupa"
+          ]
         },
         {
           "name": "Çocuk Matarası",
           "slug": "cocuk-matarasi",
           "active": true,
-          "queries": ["çocuk matarası", "çocuk matara"]
+          "queries": [
+            "çocuk matarası",
+            "çocuk matara"
+          ]
         }
       ]
     },
@@ -36,42 +51,61 @@
       "name": "Anne & Çocuk",
       "slug": "anne-cocuk",
       "active": true,
+      "stores": [
+        "Trendyol",
+        "Hepsiburada",
+        "n11"
+      ],
       "subcategories": [
         {
           "name": "Bebek Bezi",
           "slug": "bebek-bezi",
           "active": true,
-          "queries": ["bebek bezi"]
+          "queries": [
+            "bebek bezi"
+          ]
         },
         {
           "name": "Islak Mendil",
           "slug": "islak-mendil",
           "active": true,
-          "queries": ["ıslak mendil", "bebek ıslak mendil"]
+          "queries": [
+            "ıslak mendil",
+            "bebek ıslak mendil"
+          ]
         },
         {
           "name": "Biberon",
           "slug": "biberon",
           "active": true,
-          "queries": ["biberon"]
+          "queries": [
+            "biberon"
+          ]
         },
         {
           "name": "Emzik",
           "slug": "emzik",
           "active": true,
-          "queries": ["emzik"]
+          "queries": [
+            "emzik"
+          ]
         },
         {
           "name": "Mama Sandalyesi",
           "slug": "mama-sandalyesi",
           "active": true,
-          "queries": ["mama sandalyesi"]
+          "queries": [
+            "mama sandalyesi"
+          ]
         },
         {
           "name": "Bebek Bakım Ürünleri",
           "slug": "bebek-bakim-urunleri",
           "active": true,
-          "queries": ["bebek bakım ürünleri", "bebek bakım seti"]
+          "queries": [
+            "bebek bakım ürünleri",
+            "bebek bakım seti"
+          ]
         }
       ]
     },
@@ -79,42 +113,62 @@
       "name": "Makyaj",
       "slug": "makyaj",
       "active": true,
+      "stores": [
+        "Trendyol",
+        "Hepsiburada",
+        "n11"
+      ],
       "subcategories": [
         {
           "name": "Fondöten",
           "slug": "fondoten",
           "active": true,
-          "queries": ["fondöten"]
+          "queries": [
+            "fondöten"
+          ]
         },
         {
           "name": "Maskara",
           "slug": "maskara",
           "active": true,
-          "queries": ["maskara", "rimel"]
+          "queries": [
+            "maskara",
+            "rimel"
+          ]
         },
         {
           "name": "Ruj",
           "slug": "ruj",
           "active": true,
-          "queries": ["ruj"]
+          "queries": [
+            "ruj"
+          ]
         },
         {
           "name": "Kapatıcı",
           "slug": "kapatici",
           "active": true,
-          "queries": ["kapatıcı", "concealer"]
+          "queries": [
+            "kapatıcı",
+            "concealer"
+          ]
         },
         {
           "name": "Allık",
           "slug": "allik",
           "active": true,
-          "queries": ["allık"]
+          "queries": [
+            "allık"
+          ]
         },
         {
           "name": "Far Paleti",
           "slug": "far-paleti",
           "active": true,
-          "queries": ["far paleti", "göz farı paleti"]
+          "queries": [
+            "far paleti",
+            "göz farı paleti"
+          ]
         }
       ]
     },
@@ -122,42 +176,296 @@
       "name": "Ev & Yaşam",
       "slug": "ev-yasam",
       "active": true,
+      "stores": [
+        "Trendyol",
+        "Hepsiburada",
+        "n11"
+      ],
       "subcategories": [
         {
           "name": "Saklama Kabı",
           "slug": "saklama-kabi",
           "active": true,
-          "queries": ["saklama kabı", "gıda saklama kabı"]
+          "queries": [
+            "saklama kabı",
+            "gıda saklama kabı"
+          ]
         },
         {
           "name": "Tava / Tencere",
           "slug": "tava-tencere",
           "active": true,
-          "queries": ["tava", "tencere", "tencere seti"]
+          "queries": [
+            "tava",
+            "tencere",
+            "tencere seti"
+          ]
         },
         {
           "name": "Nevresim",
           "slug": "nevresim",
           "active": true,
-          "queries": ["nevresim", "nevresim takımı"]
+          "queries": [
+            "nevresim",
+            "nevresim takımı"
+          ]
         },
         {
           "name": "Havlu",
           "slug": "havlu",
           "active": true,
-          "queries": ["havlu", "banyo havlusu"]
+          "queries": [
+            "havlu",
+            "banyo havlusu"
+          ]
         },
         {
-          "name": "Küçük Ev Aletleri",
-          "slug": "kucuk-ev-aletleri",
+          "name": "Çamaşır Deterjanı",
+          "slug": "camasir-deterjani",
           "active": true,
-          "queries": ["küçük ev aletleri", "blender", "kahve makinesi", "su ısıtıcı"]
+          "queries": [
+            "çamaşır deterjanı"
+          ]
         },
         {
-          "name": "Temizlik Ürünleri",
-          "slug": "temizlik-urunleri",
+          "name": "Bulaşık Deterjanı",
+          "slug": "bulasik-deterjani",
           "active": true,
-          "queries": ["temizlik ürünleri", "çamaşır deterjanı", "bulaşık deterjanı", "yüzey temizleyici"]
+          "queries": [
+            "bulaşık deterjanı"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Teknoloji",
+      "slug": "teknoloji",
+      "active": true,
+      "stores": [
+        "Trendyol",
+        "Hepsiburada",
+        "n11",
+        "MediaMarkt",
+        "Vatan"
+      ],
+      "subcategories": [
+        {
+          "name": "Cep Telefonu",
+          "slug": "cep-telefonu",
+          "active": true,
+          "strict_match": "phone",
+          "queries": [
+            "cep telefonu"
+          ]
+        },
+        {
+          "name": "Bluetooth Kulaklık",
+          "slug": "bluetooth-kulaklik",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "bluetooth kulaklık"
+          ]
+        },
+        {
+          "name": "Kulak Üstü Kulaklık",
+          "slug": "kulak-ustu-kulaklik",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "kulak üstü kulaklık"
+          ]
+        },
+        {
+          "name": "Bluetooth Hoparlör",
+          "slug": "bluetooth-hoparlor",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "bluetooth hoparlör"
+          ]
+        },
+        {
+          "name": "Akıllı Saat",
+          "slug": "akilli-saat",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "akıllı saat"
+          ]
+        },
+        {
+          "name": "Laptop",
+          "slug": "laptop",
+          "active": true,
+          "strict_match": "laptop",
+          "queries": [
+            "laptop"
+          ]
+        },
+        {
+          "name": "Monitör",
+          "slug": "monitor",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "monitör"
+          ]
+        },
+        {
+          "name": "SSD",
+          "slug": "ssd",
+          "active": true,
+          "strict_match": "storage",
+          "queries": [
+            "ssd"
+          ]
+        },
+        {
+          "name": "Klavye",
+          "slug": "klavye",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "klavye"
+          ]
+        },
+        {
+          "name": "Mouse",
+          "slug": "mouse",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "mouse"
+          ]
+        },
+        {
+          "name": "Oyun Kolu",
+          "slug": "oyun-kolu",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "oyun kolu"
+          ]
+        },
+        {
+          "name": "Televizyon",
+          "slug": "televizyon",
+          "active": true,
+          "strict_match": "tv",
+          "queries": [
+            "televizyon"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Ev Teknolojisi",
+      "slug": "ev-teknolojisi",
+      "active": true,
+      "stores": [
+        "Trendyol",
+        "Hepsiburada",
+        "n11",
+        "MediaMarkt",
+        "Vatan"
+      ],
+      "subcategories": [
+        {
+          "name": "Robot Süpürge",
+          "slug": "robot-supurge",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "robot süpürge"
+          ]
+        },
+        {
+          "name": "Dikey Süpürge",
+          "slug": "dikey-supurge",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "dikey süpürge"
+          ]
+        },
+        {
+          "name": "Kahve Makinesi",
+          "slug": "kahve-makinesi",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "kahve makinesi"
+          ]
+        },
+        {
+          "name": "Airfryer",
+          "slug": "airfryer",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "airfryer"
+          ]
+        },
+        {
+          "name": "Blender",
+          "slug": "blender",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "blender"
+          ]
+        },
+        {
+          "name": "Tost Makinesi",
+          "slug": "tost-makinesi",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "tost makinesi"
+          ]
+        },
+        {
+          "name": "Su Isıtıcı / Kettle",
+          "slug": "kettle",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "kettle"
+          ]
+        },
+        {
+          "name": "Saç Kurutma Makinesi",
+          "slug": "sac-kurutma-makinesi",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "saç kurutma makinesi"
+          ]
+        },
+        {
+          "name": "Tıraş Makinesi",
+          "slug": "tiras-makinesi",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "tıraş makinesi"
+          ]
+        },
+        {
+          "name": "Elektrikli Diş Fırçası",
+          "slug": "elektrikli-dis-fircasi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "elektrikli diş fırçası"
+          ]
         }
       ]
     }
