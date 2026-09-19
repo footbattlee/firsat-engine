@@ -22,7 +22,7 @@ from creative.generate_deal_creative import (
 )
 
 from publishers.x_publisher import publish_x_post
-from publishers.instagram_publisher import publish_instagram_post
+from publishers.instagram_publisher import publish_instagram_post\nfrom publishers.facebook_publisher import publish_facebook_photo
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 APPROVAL_CHAT_ID = os.getenv("TELEGRAM_APPROVAL_CHAT_ID", "").strip()
@@ -30,7 +30,7 @@ PUBLISH_CHAT_ID = os.getenv("TELEGRAM_PUBLISH_CHAT_ID", "").strip()
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-PLATFORMS = ("telegram", "instagram", "x", "whatsapp")
+PLATFORMS = ("telegram", "instagram", "facebook", "x", "whatsapp")
 
 
 def require_config(require_chat_id=True):
@@ -162,6 +162,28 @@ def publish_to_instagram(data):
     outputs = render_candidate_bundle(data)
     image = outputs["instagram"]
     return publish_instagram_post(instagram_caption(data), image, data["id"])
+
+
+def facebook_caption(data):
+    gap = f"{float(data['gap_percent']):.2f}".replace(".", ",")
+    link = data.get("affiliate_url") or data["product_url"]
+    return (
+        f"🔥 FİYATZADE FIRSATI\n\n"
+        f"{data['title']}\n\n"
+        f"🛒 {data['merchant']}\n"
+        f"💸 Rakip fiyat: {money(data['competitor_price'])}\n"
+        f"🔥 Fırsat fiyatı: {money(data['cheapest_price'])}\n"
+        f"📉 %{gap} daha ucuz\n\n"
+        f"🔗 Fırsata git: {link}\n\n"
+        "Fiyatlar değişebilir. Satın almadan önce mağaza fiyatını kontrol edin.\n\n"
+        "#işbirliği #reklam #fiyatzade #indirim #fırsat"
+    )
+
+
+def publish_to_facebook(data):
+    outputs = render_candidate_bundle(data)
+    image = outputs["instagram"]
+    return publish_facebook_photo(facebook_caption(data), image)
 
 
 def publish_to_x(data):
@@ -347,6 +369,23 @@ def handle_callback(query):
                     mark_publication(candidate_id, "instagram", "failed", error_message=str(publish_exc)[:1000])
                     results.append("Instagram başarısız")
                     print(f"INSTAGRAM PUBLISH ERROR | {candidate_id} | {publish_exc}")
+
+            facebook_state = publication_state(candidate_id, "facebook")
+            if facebook_state and facebook_state.get("status") == "published":
+                post_id = facebook_state.get("external_post_id") or "-"
+                results.append("Facebook zaten yayınlandı")
+                print(f"APPROVAL PUBLISH SKIP | {candidate_id} | facebook=already_published | post_id={post_id}")
+            else:
+                try:
+                    mark_publication(candidate_id, "facebook", "publishing")
+                    post_id = publish_to_facebook(data)
+                    mark_publication(candidate_id, "facebook", "published", external_post_id=post_id)
+                    results.append("Facebook yayınlandı")
+                    print(f"APPROVAL PUBLISH | {candidate_id} | facebook=published | post_id={post_id}")
+                except Exception as publish_exc:
+                    mark_publication(candidate_id, "facebook", "failed", error_message=str(publish_exc)[:1000])
+                    results.append("Facebook başarısız")
+                    print(f"FACEBOOK PUBLISH ERROR | {candidate_id} | {publish_exc}")
 
             x_state = publication_state(candidate_id, "x")
             if x_state and x_state.get("status") == "published":
