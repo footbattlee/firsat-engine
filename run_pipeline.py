@@ -23,6 +23,8 @@ POST_STEPS = [
     ("DEAL", "Deal Engine", ROOT / "deals" / "deal_engine.py"),
 ]
 
+APPROVAL_SCRIPT = ROOT / "run_telegram_approval.py"
+
 
 def load_active_subcategories():
     if not CATEGORIES_FILE.exists():
@@ -258,6 +260,17 @@ def main():
             total = time.time() - started
             print_summary(results, total, len(categories), stopped=True)
             raise SystemExit(2)
+
+    # Deal Engine başarılı olduktan sonra yeni candidate fırsatları admin
+    # Telegram grubuna otomatik ve idempotent olarak gönder.
+    approval_result = run_process(
+        "APPROVAL",
+        "Telegram Admin Dispatch",
+        [sys.executable, str(APPROVAL_SCRIPT), "--dispatch-pending", "--limit", "100"],
+    )
+    results.append(approval_result)
+    if not approval_result["ok"]:
+        print("UYARI    | Telegram admin dispatch başarısız oldu; fırsat verileri korunuyor.")
 
     total = time.time() - started
     print_summary(results, total, len(categories), stopped=False)
