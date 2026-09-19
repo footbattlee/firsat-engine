@@ -55,6 +55,8 @@ def load_active_subcategories():
                     # categories.json içindeki diğer sorgular ileride fallback/genişletme için saklanır.
                     "query": queries[0],
                     "aliases": queries[1:],
+                    "stores": subcategory.get("stores") or category.get("stores") or [name for name, _ in COLLECTORS],
+                    "strict_match": subcategory.get("strict_match"),
                 }
             )
 
@@ -223,7 +225,8 @@ def main():
     print("=" * 96)
     print(f"Aktif alt kategori: {len(categories)}")
     print(f"Mağaza: {len(COLLECTORS)}")
-    print(f"Toplam collector çalışması: {len(categories) * len(COLLECTORS)}")
+    total_collector_runs = sum(len(category["stores"]) for category in categories)
+    print(f"Toplam collector çalışması: {total_collector_runs}")
     print("Akış: Tüm kategoriler/mağazalar -> Product Matcher -> Apply Matches -> Deal Engine")
     print("Her alt kategori için categories.json içindeki ilk sorgu ana sorgu olarak kullanılır.")
     print("Collector hataları loglanır; diğer mağaza/kategoriler çalışmaya devam eder.")
@@ -241,7 +244,10 @@ def main():
         )
         print("#" * 96)
 
+        enabled_stores = set(category["stores"])
         for collector_name, collector_script in COLLECTORS:
+            if collector_name not in enabled_stores:
+                continue
             result = run_collector(collector_name, collector_script, category)
             results.append(result)
 
