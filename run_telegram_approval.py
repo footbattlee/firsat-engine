@@ -355,6 +355,9 @@ def handle_callback(query):
     action, candidate_id = raw.split(":", 1)
 
     if action == "publish":
+        # Telegram callback queries expire quickly. Acknowledge the button press
+        # before the slower Telegram/Meta publishing work starts.
+        answer_callback(callback_id, "PAYLAŞ işlemi başlatıldı.")
         try:
             persist_publish_request(candidate_id)
             data = load_candidate_for_publish(candidate_id)
@@ -411,9 +414,8 @@ def handle_callback(query):
                     results.append("Facebook başarısız")
                     print(f"FACEBOOK PUBLISH ERROR | {candidate_id} | {publish_exc}")
 
-            answer_callback(callback_id, "PAYLAŞ: " + " | ".join(results))
+            print(f"APPROVAL PUBLISH DONE | {candidate_id} | " + " | ".join(results))
         except Exception as exc:
-            answer_callback(callback_id, "PAYLAŞ kaydedilemedi.")
             print(f"APPROVAL PUBLISH ERROR | {candidate_id} | {exc}")
     elif action == "reject":
         try:
