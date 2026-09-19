@@ -20,6 +20,25 @@ def _page_id():
     return page_id
 
 
+def _page_token():
+    response = requests.get(
+        f"{GRAPH_BASE}/me/accounts",
+        params={
+            "access_token": _token(),
+            "fields": "id,name,access_token",
+        },
+        timeout=30,
+    )
+    _raise(response, "page token")
+    for page in response.json().get("data", []):
+        if str(page.get("id")) == str(_page_id()):
+            token = str(page.get("access_token") or "").strip()
+            if token:
+                return token
+            raise RuntimeError("Facebook Page access token dondurmedi")
+    raise RuntimeError("FACEBOOK_PAGE_ID system user hesabinda bulunamadi")
+
+
 def _raise(response, operation):
     if response.ok:
         return
@@ -45,11 +64,12 @@ def verify_page_access():
 
 def publish_facebook_photo(message, image_path):
     verify_page_access()
+    page_token = _page_token()
     with open(image_path, "rb") as image:
         response = requests.post(
             f"{GRAPH_BASE}/{_page_id()}/photos",
             data={
-                "access_token": _token(),
+                "access_token": page_token,
                 "caption": message,
                 "published": "true",
             },
