@@ -508,7 +508,8 @@ def show_chat_ids(chat_username=None):
 def main():
     parser = argparse.ArgumentParser(description="Fiyatzade Telegram approval V1")
     parser.add_argument("--send", action="store_true", help="Candidate'lari Telegram onayina gonder")
-    parser.add_argument("--listen", action="store_true", help="PAYLAS/REDDET butonlarini dinle")\n    parser.add_argument("--dispatch-pending", action="store_true", help="Yeni candidate fırsatları admin onayına bir kez gönder")
+    parser.add_argument("--listen", action="store_true", help="PAYLAS/REDDET butonlarini dinle")
+    parser.add_argument("--dispatch-pending", action="store_true", help="Yeni candidate fırsatları admin onayına bir kez gönder")
     parser.add_argument("--get-chat-id", action="store_true", help="Botun gordugu chat ID'lerini listele")
     parser.add_argument("--chat-username", help="Public Telegram @kullanici adini getChat ile coz")
     parser.add_argument("--candidate-id")
