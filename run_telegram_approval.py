@@ -21,7 +21,6 @@ from creative.generate_deal_creative import (
     validate_candidate,
 )
 
-from publishers.x_publisher import publish_x_post
 from publishers.instagram_publisher import publish_instagram_post
 from publishers.facebook_publisher import publish_facebook_photo
 
@@ -31,7 +30,7 @@ PUBLISH_CHAT_ID = os.getenv("TELEGRAM_PUBLISH_CHAT_ID", "").strip()
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-PLATFORMS = ("telegram", "instagram", "facebook", "x", "whatsapp")
+PLATFORMS = ("telegram", "instagram", "facebook")
 
 
 def require_config(require_chat_id=True):
@@ -130,21 +129,6 @@ def publish_to_telegram(data):
     return str(result["message_id"])
 
 
-def x_caption(data):
-    gap = f"{float(data['gap_percent']):.2f}".replace(".", ",")
-    text = (
-        f"🔥 FİYATZADE FIRSATI\n\n"
-        f"{data['title']}\n\n"
-        f"🛒 {data['merchant']}\n"
-        f"🔥 {money(data['cheapest_price'])}\n"
-        f"📉 %{gap} daha ucuz\n\n"
-        f"🔗 {data['product_url']}\n\n"
-        "#işbirliği #reklam"
-    )
-    # Keep room for X's URL counting/normalization and avoid API rejection.
-    return text[:270]
-
-
 def instagram_caption(data):
     gap = f"{float(data['gap_percent']):.2f}".replace(".", ",")
     return (
@@ -185,12 +169,6 @@ def publish_to_facebook(data):
     outputs = render_candidate_bundle(data)
     image = outputs["instagram"]
     return publish_facebook_photo(facebook_caption(data), image)
-
-
-def publish_to_x(data):
-    outputs = render_candidate_bundle(data)
-    image = outputs["site"]
-    return publish_x_post(x_caption(data), image)
 
 
 def mark_publication(candidate_id, platform, status, *, external_post_id=None, error_message=None):
@@ -298,7 +276,7 @@ def send_candidate(data):
     outputs = render_candidate_bundle(data)
     preview = outputs["instagram"]
     with open(preview, "rb") as image:
-        api(
+        result = api(
             "sendPhoto",
             data={
                 "chat_id": APPROVAL_CHAT_ID,
@@ -309,8 +287,53 @@ def send_candidate(data):
             files={"photo": image},
         )
     print(f"TELEGRAM SENT | {data['id']} | {preview}")
-    return True
+    return str(result["message_id"])
 
+
+
+def dispatch_pending_candidates(limit=50):
+    """Send candidate deals to admin once; retries only failed/pending dispatches."""
+    candidates = load_candidates(limit)
+    sent = 0
+    skipped = 0
+    failed = 0
+    for data in candidates:
+        candidate_id = data["id"]
+        rows = sb_get(
+            "deal_approval_dispatches",
+            {"select": "status", "deal_candidate_id": f"eq.{candidate_id}", "limit": "1"},
+        )
+        if rows and rows[0].get("status") == "sent":
+            skipped += 1
+            continue
+        now = datetime.now(timezone.utc).isoformat()
+        if not rows:
+            sb_upsert(
+                "deal_approval_dispatches",
+                [{"deal_candidate_id": candidate_id, "status": "pending", "updated_at": now}],
+                "deal_candidate_id",
+            )
+        try:
+            message_id = send_candidate(data)
+            if not message_id:
+                raise RuntimeError("Validation gate candidate'i engelledi")
+            sb_patch(
+                "deal_approval_dispatches",
+                {"deal_candidate_id": f"eq.{candidate_id}"},
+                {"status": "sent", "telegram_message_id": message_id, "error_message": None,
+                 "sent_at": now, "updated_at": now},
+            )
+            sent += 1
+        except Exception as exc:
+            sb_patch(
+                "deal_approval_dispatches",
+                {"deal_candidate_id": f"eq.{candidate_id}"},
+                {"status": "failed", "error_message": str(exc)[:1000], "updated_at": now},
+            )
+            failed += 1
+            print(f"APPROVAL DISPATCH ERROR | {candidate_id} | {exc}")
+    print(f"APPROVAL DISPATCH DONE | sent={sent} | skipped={skipped} | failed={failed}")
+    return failed == 0
 
 def answer_callback(callback_id, text):
     try:
@@ -387,23 +410,6 @@ def handle_callback(query):
                     mark_publication(candidate_id, "facebook", "failed", error_message=str(publish_exc)[:1000])
                     results.append("Facebook başarısız")
                     print(f"FACEBOOK PUBLISH ERROR | {candidate_id} | {publish_exc}")
-
-            x_state = publication_state(candidate_id, "x")
-            if x_state and x_state.get("status") == "published":
-                post_id = x_state.get("external_post_id") or "-"
-                results.append("X zaten yayınlandı")
-                print(f"APPROVAL PUBLISH SKIP | {candidate_id} | x=already_published | post_id={post_id}")
-            else:
-                try:
-                    mark_publication(candidate_id, "x", "publishing")
-                    post_id = publish_to_x(data)
-                    mark_publication(candidate_id, "x", "published", external_post_id=post_id)
-                    results.append("X yayınlandı")
-                    print(f"APPROVAL PUBLISH | {candidate_id} | x=published | post_id={post_id}")
-                except Exception as publish_exc:
-                    mark_publication(candidate_id, "x", "failed", error_message=str(publish_exc)[:1000])
-                    results.append("X başarısız")
-                    print(f"X PUBLISH ERROR | {candidate_id} | {publish_exc}")
 
             answer_callback(callback_id, "PAYLAŞ: " + " | ".join(results))
         except Exception as exc:
@@ -502,7 +508,7 @@ def show_chat_ids(chat_username=None):
 def main():
     parser = argparse.ArgumentParser(description="Fiyatzade Telegram approval V1")
     parser.add_argument("--send", action="store_true", help="Candidate'lari Telegram onayina gonder")
-    parser.add_argument("--listen", action="store_true", help="PAYLAS/REDDET butonlarini dinle")
+    parser.add_argument("--listen", action="store_true", help="PAYLAS/REDDET butonlarini dinle")\n    parser.add_argument("--dispatch-pending", action="store_true", help="Yeni candidate fırsatları admin onayına bir kez gönder")
     parser.add_argument("--get-chat-id", action="store_true", help="Botun gordugu chat ID'lerini listele")
     parser.add_argument("--chat-username", help="Public Telegram @kullanici adini getChat ile coz")
     parser.add_argument("--candidate-id")
@@ -517,10 +523,9 @@ def main():
         candidates = load_candidates(args.limit, args.candidate_id)
         sent = sum(1 for item in candidates if send_candidate(item))
         print(f"TELEGRAM BATCH DONE | candidates={len(candidates)} | sent={sent}")
-    if args.listen:
-        poll()
-    if not args.send and not args.listen:
-        parser.error("--send, --listen veya --get-chat-id kullan")
+    if args.dispatch_pending:\n        dispatch_pending_candidates(args.limit)\n    if args.listen:\n        poll()
+    if not args.send and not args.listen and not args.dispatch_pending:
+        parser.error("--send, --dispatch-pending, --listen veya --get-chat-id kullan")
 
 
 if __name__ == "__main__":
