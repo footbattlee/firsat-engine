@@ -207,6 +207,104 @@ def model_overlap(a, b):
     return 0.0
 
 
+def extract_storage_gb(title):
+    raw = normalize_text(title)
+    values = set()
+    for amount, unit in re.findall(r"\b(\d{1,4})\s*(tb|gb)\b", raw):
+        value = int(amount) * (1024 if unit == "tb" else 1)
+        if 16 <= value <= 8192:
+            values.add(value)
+    return values
+
+
+def extract_ram_gb(title):
+    raw = normalize_text(title)
+    values = set()
+    patterns = [
+        r"\b(\d{1,3})\s*gb\s*ram\b",
+        r"\bram\s*(\d{1,3})\s*gb\b",
+        r"\b(\d{1,3})\s*gb\s*(?:ddr[345]|lpddr[45x]*)\b",
+    ]
+    for pattern in patterns:
+        for value in re.findall(pattern, raw):
+            amount = int(value)
+            if 2 <= amount <= 256:
+                values.add(amount)
+    return values
+
+
+def extract_cpu_tokens(title):
+    raw = normalize_text(title)
+    patterns = [
+        r"\b(?:i[3579]-?\d{4,5}[a-z]{0,2})\b",
+        r"\b(?:ryzen\s*[3579]\s*\d{4}[a-z]{0,2})\b",
+        r"\b(?:m[1234](?:\s*(?:pro|max|ultra))?)\b",
+    ]
+    return {re.sub(r"\s+", "", x) for p in patterns for x in re.findall(p, raw)}
+
+
+def extract_screen_inches(title):
+    raw = normalize_text(title)
+    values = set()
+    for value in re.findall(r"\b(\d{2}(?:[.,]\d)?)\s*(?:inc|inch|\")", raw):
+        try:
+            size = float(value.replace(",", "."))
+            if 10 <= size <= 100:
+                values.add(round(size, 1))
+        except ValueError:
+            pass
+    return values
+
+
+def technology_profile(title):
+    norm = normalize_text(title)
+    if any(x in norm for x in ("iphone", "galaxy", "xiaomi", "redmi", "poco", "telefon")):
+        return "phone"
+    if any(x in norm for x in ("laptop", "notebook", "macbook")):
+        return "laptop"
+    if re.search(r"\bssd\b", norm):
+        return "storage"
+    if any(x in norm for x in ("televizyon", " television ", " tv ")):
+        return "tv"
+    return None
+
+
+def strict_technology_compatible(a, b):
+    profile_a = technology_profile(a["title"])
+    profile_b = technology_profile(b["title"])
+    profile = profile_a if profile_a == profile_b else None
+    if profile_a or profile_b:
+        if profile is None:
+            return False, "tech-profile-conflict"
+
+        models_a = extract_model_tokens(a["title"])
+        models_b = extract_model_tokens(b["title"])
+        if not models_a or not models_b or models_a.isdisjoint(models_b):
+            return False, "tech-model-required"
+
+        storage_a = extract_storage_gb(a["title"])
+        storage_b = extract_storage_gb(b["title"])
+        if profile in ("phone", "storage") and (not storage_a or not storage_b or storage_a.isdisjoint(storage_b)):
+            return False, "tech-storage-required"
+
+        if profile == "laptop":
+            ram_a, ram_b = extract_ram_gb(a["title"]), extract_ram_gb(b["title"])
+            cpu_a, cpu_b = extract_cpu_tokens(a["title"]), extract_cpu_tokens(b["title"])
+            if not ram_a or not ram_b or ram_a.isdisjoint(ram_b):
+                return False, "tech-ram-required"
+            if not cpu_a or not cpu_b or cpu_a.isdisjoint(cpu_b):
+                return False, "tech-cpu-required"
+            if storage_a and storage_b and storage_a.isdisjoint(storage_b):
+                return False, "tech-storage-conflict"
+
+        if profile == "tv":
+            size_a, size_b = extract_screen_inches(a["title"]), extract_screen_inches(b["title"])
+            if size_a and size_b and size_a.isdisjoint(size_b):
+                return False, "tech-screen-conflict"
+
+    return True, None
+
+
 def pair_score(a, b):
     if a["merchant_id"] == b["merchant_id"]:
         return 0.0, "same-merchant"
@@ -222,6 +320,10 @@ def pair_score(a, b):
     brand_b = normalize_brand(b.get("brand"))
     if not brand_a or not brand_b or brand_a != brand_b:
         return 0.0, "brand"
+
+    tech_ok, tech_reason = strict_technology_compatible(a, b)
+    if not tech_ok:
+        return 0.0, tech_reason
 
     vol_a = extract_volume_ml(a["title"])
     vol_b = extract_volume_ml(b["title"])
