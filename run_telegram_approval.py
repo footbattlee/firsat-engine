@@ -22,7 +22,8 @@ from creative.generate_deal_creative import (
 )
 
 from publishers.x_publisher import publish_x_post
-from publishers.instagram_publisher import publish_instagram_post\nfrom publishers.facebook_publisher import publish_facebook_photo
+from publishers.instagram_publisher import publish_instagram_post
+from publishers.facebook_publisher import publish_facebook_photo
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 APPROVAL_CHAT_ID = os.getenv("TELEGRAM_APPROVAL_CHAT_ID", "").strip()
