@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 MIN_SCORE = float(os.getenv("MATCH_MIN_SCORE", "78"))
-MAX_GROUPS = int(os.getenv("MATCH_MAX_GROUPS", "30"))
+MAX_GROUPS = int(os.getenv("MATCH_MAX_GROUPS", "30"))\nDEBUG_REJECTS = os.getenv("MATCH_DEBUG_REJECTS", "0").strip().lower() in ("1", "true", "yes", "on")\nDEBUG_LIMIT = int(os.getenv("MATCH_DEBUG_LIMIT", "80"))\nDEBUG_MIN_SCORE = float(os.getenv("MATCH_DEBUG_MIN_SCORE", "60"))
 VOLUME_TOLERANCE_ML = int(os.getenv("MATCH_VOLUME_TOLERANCE_ML", "5"))
 
 STOPWORDS = {
@@ -576,6 +576,59 @@ def build_groups(rows):
     return result
 
 
+def print_rejection_diagnostics(rows):
+    if not DEBUG_REJECTS:
+        return
+
+    reasons = {}
+    near_threshold = []
+    technology_rejects = []
+
+    for i in range(len(rows)):
+        for j in range(i + 1, len(rows)):
+            a, b = rows[i], rows[j]
+            if a["merchant_id"] == b["merchant_id"]:
+                continue
+
+            score, reason = pair_score(a, b)
+            reasons[reason] = reasons.get(reason, 0) + 1
+
+            same_brand = normalize_brand(a.get("brand")) and normalize_brand(a.get("brand")) == normalize_brand(b.get("brand"))
+            if DEBUG_MIN_SCORE <= score < MIN_SCORE:
+                near_threshold.append((score, reason, a, b))
+
+            tech = technology_profile(a["title"]) or technology_profile(b["title"])
+            if tech and same_brand and score < MIN_SCORE:
+                technology_rejects.append((score, reason, tech, a, b))
+
+    near_threshold.sort(key=lambda x: -x[0])
+    technology_rejects.sort(key=lambda x: (-x[0], x[1]))
+
+    print("\n" + "=" * 88)
+    print("MATCHER DIAGNOSTIC")
+    print("=" * 88)
+    print(f"Esik: {MIN_SCORE:.1f} | Debug alt siniri: {DEBUG_MIN_SCORE:.1f}")
+    print("Red nedenleri (cross-store pair):")
+    for reason, count in sorted(reasons.items(), key=lambda x: -x[1]):
+        print(f"  {reason:<28} {count:>6}")
+
+    print(f"\n{DEBUG_MIN_SCORE:.1f}-{MIN_SCORE - 0.01:.2f} arasi esik alti aday: {len(near_threshold)}")
+    for score, reason, a, b in near_threshold[:DEBUG_LIMIT]:
+        print("-" * 88)
+        print(f"NEAR | score={score:.1f} | reason={reason}")
+        print(f"  {a['merchant']} | {a.get('brand') or '-'} | {a['title']}")
+        print(f"  {b['merchant']} | {b.get('brand') or '-'} | {b['title']}")
+
+    print(f"\nTeknoloji redleri (ayni marka, cross-store): {len(technology_rejects)}")
+    for score, reason, profile, a, b in technology_rejects[:DEBUG_LIMIT]:
+        print("-" * 88)
+        print(f"TECH-RED | profile={profile} | score={score:.1f} | reason={reason}")
+        print(f"  {a['merchant']} | {a.get('brand') or '-'} | {a['title']}")
+        print(f"    tech_keys={sorted(tech_model_keys(a['title']))} storage={sorted(extract_storage_gb(a['title']))} ram={sorted(extract_ram_gb(a['title']))} cpu={sorted(extract_cpu_tokens(a['title']))}")
+        print(f"  {b['merchant']} | {b.get('brand') or '-'} | {b['title']}")
+        print(f"    tech_keys={sorted(tech_model_keys(b['title']))} storage={sorted(extract_storage_gb(b['title']))} ram={sorted(extract_ram_gb(b['title']))} cpu={sorted(extract_cpu_tokens(b['title']))}")
+
+
 def print_groups(rows, groups):
     print("\n" + "=" * 88)
     print("PRODUCT MATCHER - DRY RUN")
@@ -620,6 +673,7 @@ def main():
     rows = load_rows()
     groups = build_groups(rows)
     print_groups(rows, groups)
+    print_rejection_diagnostics(rows)
 
 
 if __name__ == "__main__":
