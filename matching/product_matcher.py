@@ -207,7 +207,8 @@ def extract_model_tokens(title):
 def extract_age_ranges(title):
     raw = normalize_text(title)
     ranges = set()
-    for lo, hi in re.findall(r"\b(\d{1,2})\s*-\s*(\d{1,2})\s*ay\b", raw):
+    # normalize_text turns "6-18 ay" into "6 18 ay".
+    for lo, hi in re.findall(r"\b(\d{1,2})\s+(\d{1,2})\s*ay\b", raw):
         ranges.add((int(lo), int(hi)))
     return ranges
 
@@ -378,6 +379,14 @@ def generic_tech_family_keys(title):
     return keys
 
 
+def extract_critical_variant_suffixes(title):
+    norm = normalize_text(title)
+    tokens = set(norm.split())
+    # Product-family suffixes that materially change the model. Colors are
+    # deliberately excluded because Fiyatzade may compare different colors.
+    return tokens & {"pro", "plus", "max", "ultra", "mini", "lite", "gen", "ae", "ce"}
+
+
 def tech_model_keys(title):
     keys = set(extract_model_tokens(title))
     norm = normalize_text(title)
@@ -453,6 +462,11 @@ def strict_technology_compatible(a, b):
         models_b = tech_model_keys(b["title"])
         if not models_a or not models_b:
             return False, "tech-model-required"
+
+        suffix_a = extract_critical_variant_suffixes(a["title"])
+        suffix_b = extract_critical_variant_suffixes(b["title"])
+        if suffix_a != suffix_b and (suffix_a or suffix_b):
+            return False, "tech-variant-suffix-conflict"
 
         semantic_a = {x for x in models_a if x.startswith(("FAMILY:", "MODEL:", "PHONE:"))}
         semantic_b = {x for x in models_b if x.startswith(("FAMILY:", "MODEL:", "PHONE:"))}
