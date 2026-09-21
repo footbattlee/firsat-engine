@@ -7,6 +7,10 @@ from difflib import SequenceMatcher
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 MIN_SCORE = float(os.getenv("MATCH_MIN_SCORE", "78"))
