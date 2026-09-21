@@ -59,16 +59,36 @@ VOLUME_CONTEXT_WORDS = {
 def sb_get(table, params=None):
     if not SUPABASE_SERVICE_ROLE_KEY:
         raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY tanımlı değil")
-    url = f"{SUPABASE_URL}/rest/v1/{table}"
-    if params:
-        url += "?" + urlencode(params, doseq=True, safe="(),.*:-")
-    req = Request(url, headers={
+
+    # PostgREST responses are capped by the project API row limit (commonly 1000).
+    # Fetch every page explicitly; otherwise matcher silently sees only the first
+    # slice of products/variants/offers and newer categories such as technology
+    # can disappear from the matching inventory.
+    base_url = f"{SUPABASE_URL}/rest/v1/{table}"
+    headers = {
         "apikey": SUPABASE_SERVICE_ROLE_KEY,
         "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-    }, method="GET")
-    with urlopen(req, timeout=45) as resp:
-        raw = resp.read().decode()
-        return json.loads(raw) if raw else []
+    }
+    page_size = 1000
+    offset = 0
+    rows = []
+
+    while True:
+        query = dict(params or {})
+        query["limit"] = page_size
+        query["offset"] = offset
+        url = base_url + "?" + urlencode(query, doseq=True, safe="(),.*:-")
+        req = Request(url, headers=headers, method="GET")
+        with urlopen(req, timeout=45) as resp:
+            raw = resp.read().decode()
+            page = json.loads(raw) if raw else []
+
+        rows.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+
+    return rows
 
 
 def normalize_text(value):
