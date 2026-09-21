@@ -9,7 +9,10 @@ from urllib.request import Request, urlopen
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 MIN_SCORE = float(os.getenv("MATCH_MIN_SCORE", "78"))
-MAX_GROUPS = int(os.getenv("MATCH_MAX_GROUPS", "30"))\nDEBUG_REJECTS = os.getenv("MATCH_DEBUG_REJECTS", "0").strip().lower() in ("1", "true", "yes", "on")\nDEBUG_LIMIT = int(os.getenv("MATCH_DEBUG_LIMIT", "80"))\nDEBUG_MIN_SCORE = float(os.getenv("MATCH_DEBUG_MIN_SCORE", "60"))
+MAX_GROUPS = int(os.getenv("MATCH_MAX_GROUPS", "30"))
+DEBUG_REJECTS = os.getenv("MATCH_DEBUG_REJECTS", "0").strip().lower() in ("1", "true", "yes", "on")
+DEBUG_LIMIT = int(os.getenv("MATCH_DEBUG_LIMIT", "80"))
+DEBUG_MIN_SCORE = float(os.getenv("MATCH_DEBUG_MIN_SCORE", "60"))
 VOLUME_TOLERANCE_ML = int(os.getenv("MATCH_VOLUME_TOLERANCE_ML", "5"))
 
 STOPWORDS = {
