@@ -460,7 +460,15 @@ def pair_score(a, b):
     sim = title_similarity(a["title"], b["title"])
     model = model_overlap(a["title"], b["title"])
 
-    score = 48.0 + (sim * 34.0) + (model * 12.0)
+    tech_profile = technology_profile(a["title"])
+    tech_bonus = 0.0
+    if tech_profile and tech_profile == technology_profile(b["title"]):
+        tech_keys_a = tech_model_keys(a["title"])
+        tech_keys_b = tech_model_keys(b["title"])
+        if tech_keys_a and tech_keys_b and not tech_keys_a.isdisjoint(tech_keys_b):
+            tech_bonus = 12.0
+
+    score = 48.0 + (sim * 34.0) + (model * 12.0) + tech_bonus
     if vol_a is not None and vol_b is not None and abs(vol_a - vol_b) <= VOLUME_TOLERANCE_ML:
         score += 6.0
     if models_a and models_b and not models_a.isdisjoint(models_b):
