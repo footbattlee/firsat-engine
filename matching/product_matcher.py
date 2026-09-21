@@ -151,21 +151,27 @@ def extract_model_tokens(title):
     raw = unicodedata.normalize("NFKD", (title or "").upper())
     raw = "".join(ch for ch in raw if not unicodedata.combining(ch))
 
-    candidates = re.findall(r"\b[A-Z0-9]+(?:-[A-Z0-9]+)+\b|\b[A-Z]{1,8}\d{2,}[A-Z0-9]*\b", raw)
+    candidates = re.findall(
+        r"\b[A-Z]{1,8}\d{2,}[A-Z0-9]*(?:/\d{1,4})?\b|"
+        r"\b[A-Z0-9]+(?:-[A-Z0-9]+)+(?:/\d{1,4})?\b",
+        raw,
+    )
     result = set()
     color_words = {x.upper() for x in COLORS}
 
     for token in candidates:
         parts = [p for p in token.split("-") if p]
-        # MOR-TURUNCU gibi yalnız renklerden oluşan ifadeleri model sanma.
         if parts and all(p in color_words for p in parts):
             continue
 
         compact = re.sub(r"[^A-Z0-9]", "", token)
         if len(compact) < 4:
             continue
-        if not any(c.isalpha() for c in compact) and token.count("-") < 2:
+
+        # Ordinary hyphenated phrases such as LEAK-PROOF are not model codes.
+        if not any(ch.isdigit() for ch in token):
             continue
+
         result.add(token)
     return result
 
