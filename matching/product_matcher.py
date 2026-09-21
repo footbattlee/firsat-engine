@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import re
@@ -673,6 +674,13 @@ def print_groups(rows, groups):
 
 
 def main():
+    global DEBUG_REJECTS
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--debug-rejects", action="store_true", help="Esik alti ve teknoloji redlerini goster")
+    args, _ = parser.parse_known_args()
+    if args.debug_rejects:
+        DEBUG_REJECTS = True
+
     rows = load_rows()
     groups = build_groups(rows)
     print_groups(rows, groups)
