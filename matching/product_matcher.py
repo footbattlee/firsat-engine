@@ -308,6 +308,39 @@ def extract_screen_inches(title):
     return values
 
 
+def extract_phone_family(title):
+    norm = normalize_text(title)
+    patterns = [
+        r"\biphone\s+(\d{1,2})\s*(pro max|pro|plus|mini)?\b",
+        r"\bgalaxy\s+([asz]\d{1,3}(?:\s*(?:ultra|plus|fe))?)\b",
+        r"\b(redmi|poco)\s+([a-z0-9]+(?:\s+[a-z0-9]+){0,2})\b",
+    ]
+    for idx, pattern in enumerate(patterns):
+        m = re.search(pattern, norm)
+        if not m:
+            continue
+        if idx == 0:
+            return "iphone " + m.group(1) + ((" " + m.group(2)) if m.group(2) else "")
+        return " ".join(x for x in m.groups() if x)
+    return None
+
+
+def tech_model_keys(title):
+    keys = set(extract_model_tokens(title))
+    norm = normalize_text(title)
+
+    # Consumer model names such as Q20i/R50i may contain only one digit and
+    # are intentionally not covered by the stricter general SKU extractor.
+    for token in re.findall(r"\b[a-z]{1,8}\d{1,5}[a-z0-9]*\b", norm):
+        if len(token) >= 3:
+            keys.add(token.upper())
+
+    phone = extract_phone_family(title)
+    if phone:
+        keys.add("PHONE:" + phone.upper())
+    return keys
+
+
 def technology_profile(title):
     norm = normalize_text(title)
     if any(x in norm for x in ("iphone", "galaxy", "xiaomi", "redmi", "poco", "telefon")):
@@ -335,8 +368,8 @@ def strict_technology_compatible(a, b):
         if profile is None:
             return False, "tech-profile-conflict"
 
-        models_a = extract_model_tokens(a["title"])
-        models_b = extract_model_tokens(b["title"])
+        models_a = tech_model_keys(a["title"])
+        models_b = tech_model_keys(b["title"])
         if not models_a or not models_b or models_a.isdisjoint(models_b):
             return False, "tech-model-required"
 
