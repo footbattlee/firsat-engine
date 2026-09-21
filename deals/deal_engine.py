@@ -29,13 +29,30 @@ def headers(extra=None):
 
 
 def sb_get(table, params=None):
-    url = f"{SUPABASE_URL}/rest/v1/{table}"
-    if params:
-        url += "?" + urlencode(params, doseq=True, safe="(),.*:-+")
-    req = Request(url, headers=headers(), method="GET")
-    with urlopen(req, timeout=45) as resp:
-        raw = resp.read().decode()
-        return json.loads(raw) if raw else []
+    # PostgREST has a per-request row cap (commonly 1000). Deal engine must
+    # paginate just like the matcher; otherwise newer matches/offers silently
+    # disappear and valid cross-store products are reported as single-store.
+    base_url = f"{SUPABASE_URL}/rest/v1/{table}"
+    page_size = 1000
+    offset = 0
+    rows = []
+
+    while True:
+        query = dict(params or {})
+        query["limit"] = page_size
+        query["offset"] = offset
+        url = base_url + "?" + urlencode(query, doseq=True, safe="(),.*:-+")
+        req = Request(url, headers=headers(), method="GET")
+        with urlopen(req, timeout=45) as resp:
+            raw = resp.read().decode()
+            page = json.loads(raw) if raw else []
+
+        rows.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+
+    return rows
 
 
 def sb_upsert(table, row, on_conflict):
