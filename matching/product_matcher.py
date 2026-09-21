@@ -170,6 +170,52 @@ def extract_model_tokens(title):
     return result
 
 
+def extract_age_ranges(title):
+    raw = normalize_text(title)
+    ranges = set()
+    for lo, hi in re.findall(r"\b(\d{1,2})\s*-\s*(\d{1,2})\s*ay\b", raw):
+        ranges.add((int(lo), int(hi)))
+    return ranges
+
+
+def extract_pack_counts(title):
+    raw = normalize_text(title)
+    values = set()
+    for value in re.findall(r"\b(\d{1,4})\s*(?:adet|li paket|li)\b", raw):
+        amount = int(value)
+        if 2 <= amount <= 1000:
+            values.add(amount)
+    return values
+
+
+def model_evidence_compatible(a, b):
+    models_a = extract_model_tokens(a["title"])
+    models_b = extract_model_tokens(b["title"])
+
+    if models_a and models_b and models_a.isdisjoint(models_b):
+        return False, "model-conflict"
+
+    # Bir tarafta açık model kodu varsa diğer tarafta kodun eksik olması yüksek
+    # benzerlikle otomatik onay için yeterli kanıt değildir. GTIN eşleşmesi bu
+    # kontrolden önce zaten kesin eşleşme olarak kabul edilir.
+    if bool(models_a) != bool(models_b):
+        return False, "model-missing-one-side"
+
+    return True, None
+
+
+def variant_evidence_compatible(a, b):
+    ages_a, ages_b = extract_age_ranges(a["title"]), extract_age_ranges(b["title"])
+    if ages_a and ages_b and ages_a.isdisjoint(ages_b):
+        return False, "age-range-conflict"
+
+    packs_a, packs_b = extract_pack_counts(a["title"]), extract_pack_counts(b["title"])
+    if packs_a and packs_b and packs_a.isdisjoint(packs_b):
+        return False, "pack-count-conflict"
+
+    return True, None
+
+
 def valid_gtin(value):
     if not value:
         return None
@@ -341,10 +387,16 @@ def pair_score(a, b):
     if colors_a and colors_b and colors_a.isdisjoint(colors_b):
         return 0.0, "color-conflict"
 
+    model_ok, model_reason = model_evidence_compatible(a, b)
+    if not model_ok:
+        return 0.0, model_reason
+
+    variant_ok, variant_reason = variant_evidence_compatible(a, b)
+    if not variant_ok:
+        return 0.0, variant_reason
+
     models_a = extract_model_tokens(a["title"])
     models_b = extract_model_tokens(b["title"])
-    if models_a and models_b and models_a.isdisjoint(models_b):
-        return 0.0, "model-conflict"
 
     sim = title_similarity(a["title"], b["title"])
     model = model_overlap(a["title"], b["title"])
