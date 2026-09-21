@@ -136,18 +136,32 @@ def create_canonical(members):
 
 def apply_group(best_score, indexes, edges, rows):
     members = [rows[i] for i in indexes]
-
     existing = [existing_match(m["product_id"]) for m in members]
-    if any(existing):
-        print("SKIP: Gruptaki ürünlerden en az biri daha önce canonical ürüne bağlanmış.")
+    canonical_ids = {m["canonical_product_id"] for m in existing if m}
+
+    # If members point at different canonicals, merging automatically would be
+    # destructive. Leave the group untouched for manual reconciliation.
+    if len(canonical_ids) > 1:
+        print("CONFLICT: Grup birden fazla mevcut canonical ürüne bağlı; otomatik birleştirme yapılmadı.")
         return False
 
-    canonical = create_canonical(members)
+    if canonical_ids:
+        canonical = {"id": next(iter(canonical_ids))}
+        new_members = [m for m, match in zip(members, existing) if not match]
+        if not new_members:
+            print("SKIP: Grubun tüm ürünleri zaten aynı canonical ürüne bağlı.")
+            return False
+        action = "ATTACHED"
+    else:
+        canonical = create_canonical(members)
+        new_members = members
+        action = "APPROVED"
+
     reasons = sorted({reason for _, reason, _, _ in edges}) or ["heuristic"]
     reason_text = ",".join(reasons)
     now = datetime.now(timezone.utc).isoformat()
 
-    for member in members:
+    for member in new_members:
         sb(
             "POST",
             "product_matches",
@@ -162,8 +176,11 @@ def apply_group(best_score, indexes, edges, rows):
             prefer="return=minimal",
         )
 
-    print(f"APPROVED: {canonical['title']} | {len(members)} mağaza ürünü | score={best_score:.1f}")
-    for member in sorted(members, key=lambda x: (x["price"], x["merchant"])):
+    if action == "ATTACHED":
+        print(f"ATTACHED: mevcut canonical'a {len(new_members)} yeni mağaza ürünü eklendi | score={best_score:.1f}")
+    else:
+        print(f"APPROVED: {canonical['title']} | {len(members)} mağaza ürünü | score={best_score:.1f}")
+    for member in sorted(new_members, key=lambda x: (x["price"], x["merchant"])):
         print(f"  {member['merchant']:<14} {member['price']:>10.2f} {member['currency']} | {member['title']}")
     return True
 
