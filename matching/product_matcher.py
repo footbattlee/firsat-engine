@@ -371,13 +371,16 @@ def consumer_model_phrase(title):
 
 def technology_profile(title):
     norm = normalize_text(title)
+    # normalize_text() removes Turkish diacritics but keeps dotless-i as "i".
+    # Match normalized ASCII phrases here; otherwise titles such as
+    # "Kulaklık", "Dizüstü" and "Akıllı Saat" silently miss the tech path.
     if any(x in norm for x in ("iphone", "galaxy", "xiaomi", "redmi", "poco", "telefon")):
         return "phone"
     if any(x in norm for x in ("laptop", "notebook", "macbook", "dizustu", "tasinabilir bilgisayar")):
         return "laptop"
     if re.search(r"\bssd\b", norm):
         return "storage"
-    if any(x in norm for x in ("televizyon", " television ", " tv ")):
+    if re.search(r"\b(televizyon|television|tv)\b", norm):
         return "tv"
     if any(x in norm for x in (
         "kulaklik", "hoparlor", "akilli saat", "monitor", "klavye", "mouse",
@@ -593,6 +596,12 @@ def print_technology_inventory(rows):
     print("TECH INVENTORY")
     print("=" * 88)
     print(f"Matcher icindeki teknoloji offer: {len(tech_rows)}")
+
+    unclassified_focus = [row for row in rows if any(x in normalize_text(row["title"]) for x in ("q20i", "q30", "space one", "liberty 5", "iphone 17", "aspire lite")) and not technology_profile(row["title"])]
+    if unclassified_focus:
+        print(f"Siniflandirilamayan odak teknoloji offer: {len(unclassified_focus)}")
+        for row in unclassified_focus[:DEBUG_LIMIT]:
+            print(f"  UNCLASSIFIED | {row['merchant']} | {row.get('brand') or '-'} | {row['title']}")
 
     by_profile = {}
     for _, _, profile in tech_rows:
