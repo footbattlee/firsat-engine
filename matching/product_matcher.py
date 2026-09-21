@@ -195,15 +195,18 @@ def extract_pack_counts(title):
 
 
 def model_evidence_compatible(a, b):
+    # Technology products use their own family/model compatibility rules.
+    # Applying the generic one-sided SKU rule after a valid tech-family match
+    # blocks real matches such as Q20i vs Q20i A3004 or iPhone family names.
+    if technology_profile(a["title"]) or technology_profile(b["title"]):
+        return True, None
+
     models_a = extract_model_tokens(a["title"])
     models_b = extract_model_tokens(b["title"])
 
     if models_a and models_b and models_a.isdisjoint(models_b):
         return False, "model-conflict"
 
-    # Bir tarafta açık model kodu varsa diğer tarafta kodun eksik olması yüksek
-    # benzerlikle otomatik onay için yeterli kanıt değildir. GTIN eşleşmesi bu
-    # kontrolden önce zaten kesin eşleşme olarak kabul edilir.
     if bool(models_a) != bool(models_b):
         return False, "model-missing-one-side"
 
@@ -338,7 +341,24 @@ def tech_model_keys(title):
     phone = extract_phone_family(title)
     if phone:
         keys.add("PHONE:" + phone.upper())
+
+    phrase = consumer_model_phrase(title)
+    if phrase:
+        keys.add("MODEL:" + phrase.upper())
     return keys
+
+
+def consumer_model_phrase(title):
+    norm = normalize_text(title)
+    patterns = [
+        r"\bsoundcore\s+(q\d+[a-z0-9]*|r\d+[a-z0-9]*|space\s+(?:one|\d+)|liberty\s+\d+)\b",
+        r"\b(airpods\s+(?:pro\s*)?\d*)\b",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, norm)
+        if m:
+            return re.sub(r"\s+", " ", m.group(1)).strip()
+    return None
 
 
 def technology_profile(title):
