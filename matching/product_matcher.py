@@ -260,14 +260,20 @@ def technology_profile(title):
     norm = normalize_text(title)
     if any(x in norm for x in ("iphone", "galaxy", "xiaomi", "redmi", "poco", "telefon")):
         return "phone"
-    if any(x in norm for x in ("laptop", "notebook", "macbook")):
+    if any(x in norm for x in ("laptop", "notebook", "macbook", "dizustu", "tasinabilir bilgisayar")):
         return "laptop"
     if re.search(r"\bssd\b", norm):
         return "storage"
     if any(x in norm for x in ("televizyon", " television ", " tv ")):
         return "tv"
+    if any(x in norm for x in (
+        "kulaklik", "hoparlor", "akilli saat", "monitor", "klavye", "mouse",
+        "oyun kolu", "robot supurge", "dikey supurge", "kahve makinesi",
+        "airfryer", "blender", "tost makinesi", "kettle", "su isitici",
+        "sac kurutma", "tiras makinesi", "elektrikli dis fircasi",
+    )):
+        return "model"
     return None
-
 
 def strict_technology_compatible(a, b):
     profile_a = technology_profile(a["title"])
