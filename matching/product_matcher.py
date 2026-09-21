@@ -13,7 +13,7 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-MIN_SCORE = float(os.getenv("MATCH_MIN_SCORE", "78"))
+MIN_SCORE = float(os.getenv("MATCH_MIN_SCORE", "75"))
 MAX_GROUPS = int(os.getenv("MATCH_MAX_GROUPS", "30"))
 DEBUG_REJECTS = os.getenv("MATCH_DEBUG_REJECTS", "0").strip().lower() in ("1", "true", "yes", "on")
 DEBUG_LIMIT = int(os.getenv("MATCH_DEBUG_LIMIT", "80"))
@@ -584,6 +584,51 @@ def build_groups(rows):
     return result
 
 
+def print_technology_inventory(rows):
+    if not DEBUG_REJECTS:
+        return
+
+    tech_rows = [(idx, row, technology_profile(row["title"])) for idx, row in enumerate(rows) if technology_profile(row["title"])]
+    print("\n" + "=" * 88)
+    print("TECH INVENTORY")
+    print("=" * 88)
+    print(f"Matcher icindeki teknoloji offer: {len(tech_rows)}")
+
+    by_profile = {}
+    for _, _, profile in tech_rows:
+        by_profile[profile] = by_profile.get(profile, 0) + 1
+    for profile, count in sorted(by_profile.items()):
+        print(f"  {profile:<12} {count:>5}")
+
+    interesting = ("q20i", "q30", "space one", "liberty 5", "iphone 17", "aspire lite")
+    focus = [(idx, row, profile) for idx, row, profile in tech_rows if any(x in normalize_text(row["title"]) for x in interesting)]
+    print(f"\nOdak teknoloji offer: {len(focus)}")
+    for _, row, profile in focus:
+        print("-" * 88)
+        print(f"{row['merchant']} | {row.get('brand') or '-'} | profile={profile}")
+        print(f"  {row['title']}")
+        print(f"  tech_keys={sorted(tech_model_keys(row['title']))} storage={sorted(extract_storage_gb(row['title']))} ram={sorted(extract_ram_gb(row['title']))} cpu={sorted(extract_cpu_tokens(row['title']))}")
+
+    print("\nOdak cross-store pair sonuclari:")
+    shown = 0
+    for x in range(len(focus)):
+        ia, a, pa = focus[x]
+        for y in range(x + 1, len(focus)):
+            ib, b, pb = focus[y]
+            if a["merchant_id"] == b["merchant_id"]:
+                continue
+            if normalize_brand(a.get("brand")) != normalize_brand(b.get("brand")):
+                continue
+            score, reason = pair_score(a, b)
+            print("-" * 88)
+            print(f"{score:5.1f} | {reason} | {a['merchant']} <-> {b['merchant']}")
+            print(f"  A: {a['title']}")
+            print(f"  B: {b['title']}")
+            shown += 1
+            if shown >= DEBUG_LIMIT:
+                return
+
+
 def print_rejection_diagnostics(rows):
     if not DEBUG_REJECTS:
         return
@@ -689,6 +734,7 @@ def main():
     groups = build_groups(rows)
     print_groups(rows, groups)
     print_rejection_diagnostics(rows)
+    print_technology_inventory(rows)
 
 
 if __name__ == "__main__":
