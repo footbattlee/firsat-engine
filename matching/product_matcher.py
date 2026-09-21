@@ -356,9 +356,39 @@ def extract_phone_family(title):
     return None
 
 
+def generic_tech_family_keys(title):
+    norm = normalize_text(title)
+    keys = set()
+
+    # Common consumer families where a generic certification/spec token (IP67,
+    # wattage, DPI, etc.) must never become the product identity.
+    patterns = [
+        r"\b(jbl\s+)?(go\s*\d+)\b",
+        r"\b(jbl\s+)?(charge\s*\d+)\b",
+        r"\b(jbl\s+)?(flip\s*\d+)\b",
+        r"\b(freebuds\s+se\s*\d+(?:\s+anc)?)\b",
+        r"\b(odyssey\s+g\d+)\b",
+        r"\b(deebot\s+[a-z]*\d+[a-z]*)\b",
+    ]
+    for pattern in patterns:
+        for m in re.finditer(pattern, norm):
+            value = m.group(m.lastindex or 0)
+            if value:
+                keys.add("FAMILY:" + re.sub(r"\s+", "", value).upper())
+    return keys
+
+
 def tech_model_keys(title):
     keys = set(extract_model_tokens(title))
     norm = normalize_text(title)
+
+    # These are specifications/certifications, not product model identities.
+    noisy_patterns = (
+        r"^IP\\d{2}$", r"^BT\\d+$", r"^BT\\d+\\d+$", r"^USB\\d+$",
+        r"^\\d+DPI$", r"^\\d+HZ$", r"^\\d+W$",
+    )
+    keys = {k for k in keys if not any(re.match(p, k.upper()) for p in noisy_patterns)}
+    keys.update(generic_tech_family_keys(title))
 
     # Consumer model names such as Q20i/R50i may contain only one digit and
     # are intentionally not covered by the stricter general SKU extractor.
@@ -421,7 +451,15 @@ def strict_technology_compatible(a, b):
 
         models_a = tech_model_keys(a["title"])
         models_b = tech_model_keys(b["title"])
-        if not models_a or not models_b or models_a.isdisjoint(models_b):
+        if not models_a or not models_b:
+            return False, "tech-model-required"
+
+        semantic_a = {x for x in models_a if x.startswith(("FAMILY:", "MODEL:", "PHONE:"))}
+        semantic_b = {x for x in models_b if x.startswith(("FAMILY:", "MODEL:", "PHONE:"))}
+        if semantic_a or semantic_b:
+            if not semantic_a or not semantic_b or semantic_a.isdisjoint(semantic_b):
+                return False, "tech-family-conflict"
+        elif models_a.isdisjoint(models_b):
             return False, "tech-model-required"
 
         storage_a = extract_storage_gb(a["title"])
