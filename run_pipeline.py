@@ -15,6 +15,7 @@ COLLECTORS = [
     ("n11", ROOT / "collectors" / "n11.py"),
     ("MediaMarkt", ROOT / "collectors" / "mediamarkt.py"),
     ("Vatan", ROOT / "collectors" / "vatan.py"),
+    ("Amazon", ROOT / "collectors" / "amazon.py"),
 ]
 
 POST_STEPS = [
@@ -55,7 +56,7 @@ def load_active_subcategories():
                     # categories.json içindeki diğer sorgular ileride fallback/genişletme için saklanır.
                     "query": queries[0],
                     "aliases": queries[1:],
-                    "stores": subcategory.get("stores") or category.get("stores") or [name for name, _ in COLLECTORS],
+                    "stores": list(dict.fromkeys((subcategory.get("stores") or category.get("stores") or [name for name, _ in COLLECTORS]) + (["Amazon"] if os.getenv("AMAZON_ENABLED", "1").strip().lower() not in {"0", "false", "no"} else []))),
                     "strict_match": subcategory.get("strict_match"),
                 }
             )
