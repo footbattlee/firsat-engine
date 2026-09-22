@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://www.amazon.com.tr"
 SEARCH_URL = BASE_URL + "/s?k={query}"
+ALT_SEARCH_URL = BASE_URL + "/s/?field-keywords={query}"
 DEFAULT_QUERY = os.getenv("AMAZON_QUERY", "termos").strip() or "termos"
 LIMIT = int(os.getenv("AMAZON_LIMIT", "20"))
 REQUEST_TIMEOUT = int(os.getenv("AMAZON_TIMEOUT", "25"))
@@ -21,6 +22,9 @@ REQUEST_DELAY_SECONDS = float(os.getenv("AMAZON_REQUEST_DELAY", "0.6"))
 MAX_RETRIES = int(os.getenv("AMAZON_MAX_RETRIES", "2"))
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+PROXY_SERVER = os.getenv("PROXY_SERVER", "").strip()
+PROXY_USERNAME = os.getenv("PROXY_USERNAME", "").strip()
+PROXY_PASSWORD = os.getenv("PROXY_PASSWORD", "").strip()
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
@@ -32,10 +36,35 @@ ASIN_RE = re.compile(r"/(?:dp|gp/product)/([A-Z0-9]{10})(?:[/?#]|$)", re.I)
 def headers():
     return {
         "User-Agent": random.choice(USER_AGENTS),
-        "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
+        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Cache-Control": "no-cache",
+        "Referer": "https://www.google.com/",
+        "Cache-Control": "max-age=0",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
     }
+
+
+def proxy_url():
+    if not PROXY_SERVER:
+        return None
+    server = PROXY_SERVER
+    if "://" not in server:
+        server = "http://" + server
+    if PROXY_USERNAME and PROXY_PASSWORD:
+        parsed = urlparse(server)
+        host = parsed.netloc or parsed.path
+        return f"{parsed.scheme or 'http'}://{quote_plus(PROXY_USERNAME)}:{quote_plus(PROXY_PASSWORD)}@{host}"
+    return server
+
+
+def configure_session_proxy(session):
+    proxy = proxy_url()
+    if proxy:
+        session.proxies.update({"http": proxy, "https": proxy})
+        print("AMAZON  | proxy enabled")
+    return proxy
 
 
 def normalize_text(value):
@@ -88,9 +117,12 @@ def fetch_requests(url, session):
     for attempt in range(MAX_RETRIES):
         try:
             r = session.get(url, headers=headers(), timeout=REQUEST_TIMEOUT, allow_redirects=True)
-            if r.status_code == 200 and r.text and not looks_blocked(r.text):
+            content_type = (r.headers.get("content-type") or "").lower()
+            blocked = looks_blocked(r.text)
+            print(f"AMAZON  | requests | status={r.status_code} | type={content_type.split(';')[0] or '?'} | url={r.url}")
+            if r.status_code == 200 and "text/html" in content_type and r.text and not blocked:
                 return r.text
-            last = f"HTTP {r.status_code}" if not looks_blocked(r.text) else "CAPTCHA/bot check"
+            last = "CAPTCHA/bot check" if blocked else f"HTTP {r.status_code} type={content_type or '?'}"
         except requests.RequestException as exc:
             last = str(exc)
         if attempt + 1 < MAX_RETRIES:
@@ -108,10 +140,21 @@ def fetch_playwright(url):
 
     try:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(
-                headless=True,
-                args=["--disable-dev-shm-usage"],
-            )
+            launch_kwargs = {
+                "headless": True,
+                "args": ["--disable-dev-shm-usage"],
+            }
+            purl = proxy_url()
+            if purl:
+                parsed_proxy = urlparse(purl)
+                launch_kwargs["proxy"] = {
+                    "server": f"{parsed_proxy.scheme}://{parsed_proxy.hostname}:{parsed_proxy.port}",
+                }
+                if parsed_proxy.username:
+                    launch_kwargs["proxy"]["username"] = parsed_proxy.username
+                if parsed_proxy.password:
+                    launch_kwargs["proxy"]["password"] = parsed_proxy.password
+            browser = pw.chromium.launch(**launch_kwargs)
             context = browser.new_context(
                 locale="tr-TR",
                 timezone_id="Europe/Istanbul",
@@ -190,11 +233,17 @@ def fetch_playwright(url):
     return None
 
 
-def fetch_html(url, session):
-    html = fetch_requests(url, session)
-    if html:
-        return html
-    return fetch_playwright(url)
+def fetch_html(url, session, alternates=None):
+    candidates = [url] + list(alternates or [])
+    for candidate in candidates:
+        html = fetch_requests(candidate, session)
+        if html:
+            return html
+    for candidate in candidates:
+        html = fetch_playwright(candidate)
+        if html:
+            return html
+    return None
 
 
 def first_text(node, selectors):
@@ -301,8 +350,11 @@ def enrich_product(item, session):
 
 
 def collect(query=DEFAULT_QUERY, limit=LIMIT):
-    url = SEARCH_URL.format(query=quote_plus(query))
+    encoded_query = quote_plus(query)
+    url = SEARCH_URL.format(query=encoded_query)
+    alt_url = ALT_SEARCH_URL.format(query=encoded_query)
     session = requests.Session()
+    configure_session_proxy(session)
 
     # Barath-207/Amazon-Price-Tracker yaklaşımı: önce normal HTTP, bloklanırsa
     # gerçek Chromium/Playwright fallback. Türkiye locale ve fiyat formatına uyarlandı.
@@ -312,7 +364,7 @@ def collect(query=DEFAULT_QUERY, limit=LIMIT):
         pass
 
     print(f"AMAZON  | opening | {url}")
-    html = fetch_html(url, session)
+    html = fetch_html(url, session, alternates=[alt_url])
     if not html:
         print("AMAZON  | search page alınamadı")
         return []
