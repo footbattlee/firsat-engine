@@ -1,0 +1,417 @@
+import json
+import os
+import random
+import re
+import time
+import unicodedata
+from datetime import datetime, timezone
+from urllib.error import HTTPError
+from urllib.parse import quote_plus, urlencode, urljoin, urlparse
+from urllib.request import Request, urlopen
+
+import requests
+from bs4 import BeautifulSoup
+
+BASE_URL = "https://www.amazon.com.tr"
+SEARCH_URL = BASE_URL + "/s?k={query}"
+DEFAULT_QUERY = os.getenv("AMAZON_QUERY", "termos").strip() or "termos"
+LIMIT = int(os.getenv("AMAZON_LIMIT", "20"))
+REQUEST_TIMEOUT = int(os.getenv("AMAZON_TIMEOUT", "25"))
+REQUEST_DELAY_SECONDS = float(os.getenv("AMAZON_REQUEST_DELAY", "0.6"))
+MAX_RETRIES = int(os.getenv("AMAZON_MAX_RETRIES", "2"))
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+]
+ASIN_RE = re.compile(r"/(?:dp|gp/product)/([A-Z0-9]{10})(?:[/?#]|$)", re.I)
+
+
+def headers():
+    return {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Cache-Control": "no-cache",
+    }
+
+
+def normalize_text(value):
+    value = unicodedata.normalize("NFKD", (value or "").casefold().strip())
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    value = re.sub(r"[^a-z0-9çğıöşü]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def parse_try_price(raw):
+    if not raw:
+        return None
+    text = str(raw).replace("\xa0", " ").strip()
+    text = re.sub(r"(?i)(TL|TRY|₺)", "", text)
+    m = re.search(r"(\d[\d\.\s]*(?:,\d{1,2})?)", text)
+    if not m:
+        return None
+    number = m.group(1).replace(" ", "")
+    if "," in number:
+        number = number.replace(".", "").replace(",", ".")
+    elif number.count(".") > 1 or (number.count(".") == 1 and len(number.rsplit(".", 1)[1]) == 3):
+        number = number.replace(".", "")
+    try:
+        value = float(number)
+        return value if value > 0 else None
+    except ValueError:
+        return None
+
+
+def extract_asin(url):
+    m = ASIN_RE.search(url or "")
+    return m.group(1).upper() if m else None
+
+
+def canonical_product_url(asin):
+    return f"{BASE_URL}/dp/{asin}"
+
+
+def looks_blocked(html):
+    lower = (html or "").casefold()
+    markers = (
+        "captcha", "robot check", "automated access",
+        "enter the characters you see below", "üzgünüz",
+    )
+    return any(x in lower for x in markers)
+
+
+def fetch_requests(url, session):
+    last = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            r = session.get(url, headers=headers(), timeout=REQUEST_TIMEOUT, allow_redirects=True)
+            if r.status_code == 200 and r.text and not looks_blocked(r.text):
+                return r.text
+            last = f"HTTP {r.status_code}" if not looks_blocked(r.text) else "CAPTCHA/bot check"
+        except requests.RequestException as exc:
+            last = str(exc)
+        if attempt + 1 < MAX_RETRIES:
+            time.sleep((2 ** attempt) + random.uniform(0.2, 0.8))
+    print(f"AMAZON  | requests fallback needed | {last}")
+    return None
+
+
+def fetch_playwright(url):
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return None
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+            )
+            context = browser.new_context(
+                locale="tr-TR",
+                user_agent=random.choice(USER_AGENTS),
+                viewport={"width": 1365, "height": 900},
+                extra_http_headers={"Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"},
+            )
+            page = context.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=REQUEST_TIMEOUT * 3000)
+            page.wait_for_timeout(2200)
+            html = page.content()
+            browser.close()
+            if html and not looks_blocked(html):
+                return html
+    except Exception as exc:
+        print(f"AMAZON  | Playwright error | {exc}")
+    return None
+
+
+def fetch_html(url, session):
+    html = fetch_requests(url, session)
+    if html:
+        return html
+    return fetch_playwright(url)
+
+
+def first_text(node, selectors):
+    for selector in selectors:
+        el = node.select_one(selector)
+        if el:
+            text = el.get_text(" ", strip=True)
+            if text:
+                return text
+    return None
+
+
+def first_attr(node, selectors, attr):
+    for selector in selectors:
+        el = node.select_one(selector)
+        if el and el.get(attr):
+            return str(el.get(attr)).strip()
+    return None
+
+
+def parse_search_results(html, limit):
+    soup = BeautifulSoup(html, "html.parser")
+    products = []
+    seen = set()
+    for card in soup.select("[data-component-type='s-search-result'][data-asin]"):
+        asin = (card.get("data-asin") or "").strip().upper()
+        if not re.fullmatch(r"[A-Z0-9]{10}", asin) or asin in seen:
+            continue
+
+        title = first_text(card, ["h2 span", "h2 a span", "[data-cy='title-recipe'] span"])
+        price_text = first_text(card, [".a-price .a-offscreen", ".a-price-whole"])
+        price = parse_try_price(price_text)
+        if not title or price is None:
+            continue
+
+        image = first_attr(card, ["img.s-image", "img"], "src")
+        old_text = first_text(card, [".a-text-price .a-offscreen", "[data-a-strike='true'] .a-offscreen"])
+        old_price = parse_try_price(old_text)
+        if old_price is not None and old_price <= price:
+            old_price = None
+
+        seen.add(asin)
+        products.append({
+            "merchant": "Amazon",
+            "brand": None,
+            "title": title,
+            "asin": asin,
+            "price": price,
+            "old_price": old_price,
+            "image_url": image,
+            "product_url": canonical_product_url(asin),
+        })
+        if len(products) >= limit:
+            break
+    return products
+
+
+def enrich_product(item, session):
+    html = fetch_html(item["product_url"], session)
+    if not html:
+        return item
+    soup = BeautifulSoup(html, "html.parser")
+
+    title = first_text(soup, ["#productTitle", "#title", "h1.a-size-large"])
+    if title:
+        item["title"] = title.strip()
+
+    brand_text = first_text(soup, ["#bylineInfo"])
+    if brand_text:
+        brand = re.sub(r"(?i)^(marka:\s*|şu mağazayı ziyaret edin:\s*)", "", brand_text)
+        brand = re.sub(r"(?i)\s+store$", "", brand).strip(" :")
+        if brand:
+            item["brand"] = brand
+
+    image = first_attr(soup, ["#landingImage", "#imgBlkFront", "img.a-dynamic-image"], "data-old-hires")
+    image = image or first_attr(soup, ["#landingImage", "#imgBlkFront", "img.a-dynamic-image"], "src")
+    if image and image.startswith("http"):
+        item["image_url"] = image
+
+    price = None
+    for selector in [
+        "#corePrice_feature_div .a-price .a-offscreen",
+        "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
+        ".a-price .a-offscreen",
+        "#price_inside_buybox",
+    ]:
+        price = parse_try_price(first_text(soup, [selector]))
+        if price is not None:
+            break
+    if price is not None:
+        item["price"] = price
+
+    old_price = None
+    for selector in [
+        ".a-text-price[data-a-strike] .a-offscreen",
+        ".basisPrice .a-offscreen",
+        ".priceBlockStrikePriceString",
+    ]:
+        old_price = parse_try_price(first_text(soup, [selector]))
+        if old_price is not None:
+            break
+    item["old_price"] = old_price if old_price and old_price > item["price"] else item.get("old_price")
+    return item
+
+
+def collect(query=DEFAULT_QUERY, limit=LIMIT):
+    url = SEARCH_URL.format(query=quote_plus(query))
+    session = requests.Session()
+
+    # Barath-207/Amazon-Price-Tracker yaklaşımı: önce normal HTTP, bloklanırsa
+    # gerçek Chromium/Playwright fallback. Türkiye locale ve fiyat formatına uyarlandı.
+    try:
+        session.get(BASE_URL + "/", headers=headers(), timeout=REQUEST_TIMEOUT)
+    except requests.RequestException:
+        pass
+
+    print(f"AMAZON  | opening | {url}")
+    html = fetch_html(url, session)
+    if not html:
+        print("AMAZON  | search page alınamadı")
+        return []
+
+    products = parse_search_results(html, limit)
+    print(f"AMAZON  | search results | {len(products)}")
+
+    # Detay sayfası başlık/marka/görsel/fiyat doğrulaması sağlar.
+    enriched = []
+    for i, item in enumerate(products):
+        enriched.append(enrich_product(item, session))
+        if i + 1 < len(products):
+            time.sleep(REQUEST_DELAY_SECONDS)
+    return enriched
+
+
+def supabase_request(method, table, *, params=None, body=None, prefer=None):
+    if not SUPABASE_SERVICE_ROLE_KEY:
+        raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY tanımlı değil")
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    if params:
+        url += "?" + urlencode(params, doseq=True, safe="(),.*:-")
+    hdr = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        hdr["Prefer"] = prefer
+    payload = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
+    req = Request(url, data=payload, headers=hdr, method=method)
+    try:
+        with urlopen(req, timeout=30) as response:
+            raw = response.read().decode("utf-8")
+            return json.loads(raw) if raw else None
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Supabase HTTP {exc.code}: {detail}") from exc
+
+
+def get_or_create_merchant():
+    rows = supabase_request("GET", "merchants", params={"slug": "eq.amazon", "select": "id", "limit": "1"})
+    if rows:
+        return rows[0]["id"]
+    rows = supabase_request(
+        "POST", "merchants",
+        body={"name": "Amazon", "slug": "amazon", "domain": "amazon.com.tr", "active": True},
+        prefer="return=representation",
+    )
+    return rows[0]["id"]
+
+
+def find_offer(merchant_id, asin):
+    rows = supabase_request(
+        "GET", "offers",
+        params={
+            "merchant_id": f"eq.{merchant_id}",
+            "merchant_product_id": f"eq.{asin}",
+            "select": "id,product_variant_id",
+            "limit": "1",
+        },
+    )
+    return rows[0] if rows else None
+
+
+def create_product_and_variant(item):
+    asin = item["asin"]
+    products = supabase_request(
+        "POST", "products",
+        params={"on_conflict": "slug"},
+        body={
+            "brand": item.get("brand"),
+            "title": item["title"],
+            "normalized_title": normalize_text(item["title"]),
+            "image_url": item.get("image_url"),
+            "slug": f"amazon-{asin.lower()}",
+            "active": True,
+        },
+        prefer="resolution=merge-duplicates,return=representation",
+    )
+    product_id = products[0]["id"]
+    variants = supabase_request(
+        "POST", "product_variants",
+        body={
+            "product_id": product_id,
+            "sku": f"amazon:{asin}",
+            "image_url": item.get("image_url"),
+            "active": True,
+        },
+        prefer="return=representation",
+    )
+    return variants[0]["id"]
+
+
+def save_products_to_supabase(products):
+    if not SUPABASE_SERVICE_ROLE_KEY:
+        print("Supabase skipped: SUPABASE_SERVICE_ROLE_KEY tanımlı değil.")
+        return 0
+
+    merchant_id = get_or_create_merchant()
+    checked_at = datetime.now(timezone.utc).isoformat()
+    saved = 0
+
+    for item in products:
+        asin = item.get("asin")
+        price = item.get("price")
+        if not asin or price is None:
+            continue
+
+        offer = find_offer(merchant_id, asin)
+        offer_body = {
+            "price": price,
+            "old_price": item.get("old_price"),
+            "product_url": item["product_url"],
+            "image_url": item.get("image_url"),
+            "currency": "TRY",
+            "in_stock": True,
+            "last_checked_at": checked_at,
+            "updated_at": checked_at,
+        }
+
+        if offer:
+            offer_id = offer["id"]
+            supabase_request(
+                "PATCH", "offers",
+                params={"id": f"eq.{offer_id}"},
+                body=offer_body,
+                prefer="return=minimal",
+            )
+        else:
+            variant_id = create_product_and_variant(item)
+            rows = supabase_request(
+                "POST", "offers",
+                body={
+                    **offer_body,
+                    "product_variant_id": variant_id,
+                    "merchant_id": merchant_id,
+                    "merchant_product_id": asin,
+                },
+                prefer="return=representation",
+            )
+            offer_id = rows[0]["id"]
+
+        supabase_request(
+            "POST", "price_history",
+            body={
+                "offer_id": offer_id,
+                "price": price,
+                "old_price": item.get("old_price"),
+                "in_stock": True,
+                "checked_at": checked_at,
+            },
+            prefer="return=minimal",
+        )
+        saved += 1
+
+    print(f"Supabase: {saved} Amazon ürün/fiyat kaydı işlendi.")
+    return saved
+
+
+if __name__ == "__main__":
+    rows = collect()
+    print(json.dumps(rows, ensure_ascii=False, indent=2))
+    save_products_to_supabase(rows)
