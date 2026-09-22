@@ -31,6 +31,7 @@ API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 PLATFORMS = ("telegram", "instagram", "facebook")
+MEDIA_BUCKET = os.getenv("INSTAGRAM_MEDIA_BUCKET", "instagram-media").strip() or "instagram-media"
 
 
 def require_config(require_chat_id=True):
@@ -116,6 +117,7 @@ def publish_to_telegram(data):
 
     outputs = render_candidate_bundle(data)
     preview = outputs["instagram"]
+    upload_story_assist(data["id"], outputs["story"])
     with open(preview, "rb") as image:
         result = api(
             "sendPhoto",
@@ -265,6 +267,23 @@ def keyboard(candidate_id):
             {"text": "❌ REDDET", "callback_data": f"reject:{candidate_id}"},
         ]]
     }
+
+
+def upload_story_assist(candidate_id, story_path):
+    """Upload the ready 1080x1920 Story creative for the cloud webhook."""
+    object_path = f"deals/{candidate_id}/story.png"
+    url = f"{SUPABASE_URL}/storage/v1/object/{MEDIA_BUCKET}/{object_path}"
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "image/png",
+        "x-upsert": "true",
+    }
+    with open(story_path, "rb") as handle:
+        response = requests.post(url, headers=headers, data=handle, timeout=45)
+    response.raise_for_status()
+    print(f"STORY READY | {candidate_id} | {story_path}")
+    return object_path
 
 
 def send_candidate(data):
