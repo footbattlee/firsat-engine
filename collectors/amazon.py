@@ -133,11 +133,44 @@ def fetch_playwright(url):
                 f"| title={page.title()!r} | url={page.url}"
             )
 
-            response = page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=REQUEST_TIMEOUT * 1000,
-            )
+            try:
+                response = page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=REQUEST_TIMEOUT * 1000,
+                )
+            except Exception as nav_exc:
+                if "Download is starting" not in str(nav_exc):
+                    raise
+
+                print("AMAZON  | direct search navigation download response; search box fallback")
+                page.goto(
+                    BASE_URL + "/",
+                    wait_until="domcontentloaded",
+                    timeout=REQUEST_TIMEOUT * 1000,
+                )
+                page.wait_for_timeout(1000)
+
+                search_box = page.locator("#twotabsearchtextbox").first
+                if not search_box.count():
+                    raise RuntimeError("Amazon search box bulunamadı")
+
+                keyword = ""
+                for part in urlparse(url).query.split("&"):
+                    if part.startswith("k="):
+                        keyword = part[2:].replace("+", " ")
+                        break
+                if not keyword:
+                    raise RuntimeError("Amazon arama sorgusu URL'den çözülemedi")
+
+                search_box.fill(keyword)
+                with page.expect_navigation(
+                    wait_until="domcontentloaded",
+                    timeout=REQUEST_TIMEOUT * 1000,
+                ) as nav:
+                    search_box.press("Enter")
+                response = nav.value
+
             page.wait_for_timeout(2500)
             html = page.content()
             blocked = looks_blocked(html)
