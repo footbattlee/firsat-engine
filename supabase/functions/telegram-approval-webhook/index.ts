@@ -37,7 +37,7 @@ async function candidate(id:string){
    sb.from("merchants").select("name").eq("id",data.cheapest_merchant_id).single()
  ]);
  if(cpErr) throw cpErr;if(offerErr) throw offerErr;if(merchantErr) throw merchantErr;
- return {id,title:cp?.title||"-",merchant:merchant?.name||"-",gap_percent:data.gap_percent,cheapest_price:data.cheapest_price,competitor_price:data.competitor_price,product_url:offer?.product_url||""};
+ return {id,canonical_product_id:data.canonical_product_id,title:cp?.title||"-",merchant:merchant?.name||"-",gap_percent:data.gap_percent,cheapest_price:data.cheapest_price,competitor_price:data.competitor_price,product_url:offer?.product_url||""};
 }
 async function ensureRows(id:string){
  for(const platform of ["telegram","instagram","facebook"]){
