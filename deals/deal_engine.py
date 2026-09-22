@@ -292,6 +292,12 @@ def main():
         competitor_name = merchant_map.get(competitor["merchant_id"], competitor["merchant_id"])
 
         if gap + 1e-9 >= DEAL_THRESHOLD_PERCENT:
+            # Admin REDDET kalicidir; pipeline ayni urunu tekrar aday yapmamali.
+            existing_row = existing_by_canonical.get(cid)
+            if existing_row and existing_row.get("status") == "rejected":
+                print(f"SKIP | {title} | admin tarafindan reddedildi; tekrar aday yapilmadi")
+                continue
+
             history_info = analyze_history(cheapest["id"], cheapest["price"], history_map)
             verified_at = now if history_info["verified"] else None
             row = {
