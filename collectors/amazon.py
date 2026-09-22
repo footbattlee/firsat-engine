@@ -112,6 +112,29 @@ def looks_blocked(html):
     return any(x in lower for x in markers)
 
 
+def looks_like_search_page(html):
+    if not html:
+        return False
+    soup = BeautifulSoup(html, "html.parser")
+    return bool(
+        soup.select_one("[data-component-type='s-search-result'][data-asin]")
+        or soup.select_one("[data-asin] h2 a")
+        or soup.select_one("a.s-pagination-next")
+    )
+
+
+def save_debug_html(html, label):
+    if not html:
+        return
+    try:
+        from pathlib import Path
+        path = Path(f"amazon_debug_{label}.html")
+        path.write_text(html, encoding="utf-8")
+        print(f"AMAZON  | debug html saved | {path}")
+    except Exception as exc:
+        print(f"AMAZON  | debug save failed | {exc}")
+
+
 def fetch_requests(url, session):
     last = None
     for attempt in range(MAX_RETRIES):
@@ -121,8 +144,13 @@ def fetch_requests(url, session):
             blocked = looks_blocked(r.text)
             print(f"AMAZON  | requests | status={r.status_code} | type={content_type.split(';')[0] or '?'} | url={r.url}")
             if r.status_code == 200 and "text/html" in content_type and r.text and not blocked:
-                return r.text
-            last = "CAPTCHA/bot check" if blocked else f"HTTP {r.status_code} type={content_type or '?'}"
+                if "/s" in urlparse(r.url).path and not looks_like_search_page(r.text):
+                    save_debug_html(r.text, "requests_search_unrecognized")
+                    last = "HTTP 200 ama Amazon arama DOM'u bulunamadı"
+                else:
+                    return r.text
+            else:
+                last = "CAPTCHA/bot check" if blocked else f"HTTP {r.status_code} type={content_type or '?'}"
         except requests.RequestException as exc:
             last = str(exc)
         if attempt + 1 < MAX_RETRIES:
@@ -227,7 +255,11 @@ def fetch_playwright(url):
 
             browser.close()
             if html and not blocked:
-                return html
+                if "/s" in urlparse(page.url).path and not looks_like_search_page(html):
+                    save_debug_html(html, "browser_search_unrecognized")
+                    print("AMAZON  | browser page alındı ama arama sonuç DOM'u tanınmadı")
+                else:
+                    return html
     except Exception as exc:
         print(f"AMAZON  | Playwright error | {type(exc).__name__}: {exc}")
     return None
@@ -268,12 +300,27 @@ def parse_search_results(html, limit):
     soup = BeautifulSoup(html, "html.parser")
     products = []
     seen = set()
-    for card in soup.select("[data-component-type='s-search-result'][data-asin]"):
+    cards = soup.select("[data-component-type='s-search-result'][data-asin]")
+    if not cards:
+        # Oxylabs örneğindeki daha genel listing yapısını da destekle.
+        cards = []
+        for link in soup.select("[data-asin] h2 a"):
+            parent = link.find_parent(attrs={"data-asin": True})
+            if parent:
+                cards.append(parent)
+
+    for card in cards:
         asin = (card.get("data-asin") or "").strip().upper()
         if not re.fullmatch(r"[A-Z0-9]{10}", asin) or asin in seen:
             continue
 
-        title = first_text(card, ["h2 span", "h2 a span", "[data-cy='title-recipe'] span"])
+        title = first_text(card, [
+            "h2 span",
+            "h2 a span",
+            "[data-cy='title-recipe'] span",
+            "h2.a-size-mini span",
+            "h2.a-size-base-plus span",
+        ])
         price_text = first_text(card, [".a-price .a-offscreen", ".a-price-whole"])
         price = parse_try_price(price_text)
         if not title or price is None:
