@@ -103,28 +103,57 @@ def fetch_playwright(url):
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
+        print("AMAZON  | Playwright kurulu değil")
         return None
+
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(
                 headless=True,
-                args=["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+                args=["--disable-dev-shm-usage"],
             )
             context = browser.new_context(
                 locale="tr-TR",
+                timezone_id="Europe/Istanbul",
                 user_agent=random.choice(USER_AGENTS),
                 viewport={"width": 1365, "height": 900},
                 extra_http_headers={"Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"},
             )
             page = context.new_page()
-            page.goto(url, wait_until="domcontentloaded", timeout=REQUEST_TIMEOUT * 3000)
-            page.wait_for_timeout(2200)
+
+            # Önce ana sayfayı ziyaret ederek Amazon oturum/cookie'lerini oluştur.
+            warm = page.goto(
+                BASE_URL + "/",
+                wait_until="domcontentloaded",
+                timeout=REQUEST_TIMEOUT * 1000,
+            )
+            page.wait_for_timeout(1500)
+            print(
+                f"AMAZON  | browser warmup | status={warm.status if warm else '?'} "
+                f"| title={page.title()!r} | url={page.url}"
+            )
+
+            response = page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=REQUEST_TIMEOUT * 1000,
+            )
+            page.wait_for_timeout(2500)
             html = page.content()
+            blocked = looks_blocked(html)
+            print(
+                f"AMAZON  | browser search | status={response.status if response else '?'} "
+                f"| blocked={blocked} | title={page.title()!r} | url={page.url}"
+            )
+            if blocked:
+                body = (page.locator("body").inner_text(timeout=3000) or "").replace("\\n", " ")
+                print(f"AMAZON  | browser block preview | {body[:220]!r}")
+
             browser.close()
-            if html and not looks_blocked(html):
+            if html and not blocked:
                 return html
     except Exception as exc:
-        print(f"AMAZON  | Playwright error | {exc}")
+        print(f"AMAZON  | Playwright error | {type(exc).__name__}: {exc}")
     return None
 
 
