@@ -3,6 +3,8 @@ import importlib.util
 import inspect
 import json
 import os
+import re
+import unicodedata
 import sys
 from pathlib import Path
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -137,6 +139,61 @@ def enable_playwright_proxy(module, settings):
     print(f"NETWORK  | Playwright proxy enabled | {proxy_label(settings)}")
 
 
+
+def normalize_text(value):
+    value = unicodedata.normalize("NFKD", str(value or "").casefold())
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", " ", value).strip()
+
+
+def category_relevant(query, product):
+    """Conservative category gate for queries where search pages commonly leak accessories."""
+    q = normalize_text(query)
+    title = normalize_text(product.get("title"))
+    if not title:
+        return False, "empty-title"
+
+    rules = {
+        "kahve makinesi": {
+            "require_any": ("kahve makinesi", "espresso makinesi", "turk kahve makinesi", "coffee machine"),
+            "exclude_any": (
+                "kirec", "temizleyici", "tablet", "filtre kagidi", "kahve kagidi",
+                "filtre yedek", "yedek filtre", "su filtresi", "aquaclean",
+                "bakim seti", "temizlik seti", "kapsul stand", "kahve kapsulu",
+                "kahve cekirdegi", "ogutulmus kahve", "kokteyl makinesi",
+            ),
+        },
+        "powerbank": {"require_any": ("powerbank", "power bank", "tasinabilir sarj")},
+        "kedi mamasi": {"require_any": ("kedi mama", "cat food")},
+        "parfum": {"require_any": ("parfum", "eau de parfum", "eau de toilette", "edp", "edt")},
+    }
+    rule = rules.get(q)
+    if not rule:
+        return True, None
+
+    for token in rule.get("exclude_any", ()):
+        if token in title:
+            return False, f"excluded:{token}"
+    required = rule.get("require_any", ())
+    if required and not any(token in title for token in required):
+        return False, "category-term-missing"
+    return True, None
+
+
+def filter_category_products(query, products):
+    kept = []
+    rejected = 0
+    for product in products:
+        ok, reason = category_relevant(query, product)
+        if ok:
+            kept.append(product)
+        else:
+            rejected += 1
+            print(f"CATEGORY FILTER | REJECT | {reason} | {str(product.get('title') or '')[:120]}")
+    if rejected:
+        print(f"CATEGORY FILTER | query={query!r} | kept={len(kept)} | rejected={rejected}")
+    return kept
+
 def run_sync_collector(module, query: str) -> int:
     collect = getattr(module, "collect", None)
     save = getattr(module, "save_products_to_supabase", None)
@@ -145,6 +202,7 @@ def run_sync_collector(module, query: str) -> int:
 
     limit = getattr(module, "LIMIT", 20)
     products = collect(query=query, limit=limit)
+    products = filter_category_products(query, products)
 
     result = {
         "ok": bool(products),
