@@ -147,38 +147,125 @@ def normalize_text(value):
 
 
 def category_relevant(query, product):
-    """Conservative category gate for queries where search pages commonly leak accessories."""
+    """Reject obvious search leakage before any product is persisted."""
     q = normalize_text(query)
     title = normalize_text(product.get("title"))
     if not title:
         return False, "empty-title"
 
+    # Every active category query in categories.json is covered here. Keep the
+    # rules title-based and conservative: reject clear accessories/other
+    # categories, but do not require brand/model evidence at collector stage.
     rules = {
-        "kahve makinesi": {
-            "require_any": ("kahve makinesi", "espresso makinesi", "turk kahve makinesi", "coffee machine"),
-            "exclude_any": (
-                "kirec", "temizleyici", "tablet", "filtre kagidi", "kahve kagidi",
-                "filtre yedek", "yedek filtre", "su filtresi", "aquaclean",
-                "bakim seti", "temizlik seti", "kapsul stand", "kahve kapsulu",
-                "kahve cekirdegi", "ogutulmus kahve", "kokteyl makinesi",
-            ),
-        },
-        "powerbank": {"require_any": ("powerbank", "power bank", "tasinabilir sarj")},
-        "kedi mamasi": {"require_any": ("kedi mama", "cat food")},
-        "parfum": {"require_any": ("parfum", "eau de parfum", "eau de toilette", "edp", "edt")},
+        "termos": (("termos", "thermos"), ()),
+        "matara": (("matara", "suluk", "bottle"), ()),
+        "termos bardak": (("termos", "termal", "thermal", "tumbler"), ()),
+        "termos kupa": (("termos", "termal", "thermal", "tumbler"), ()),
+        "cocuk matarasi": (("matara", "suluk", "bottle"), ()),
+        "cocuk matara": (("matara", "suluk", "bottle"), ()),
+        "bebek bezi": (("bebek bezi", "cocuk bezi"), ("islak mendil", "havuz bezi")),
+        "islak mendil": (("islak mendil",), ("bebek bezi",)),
+        "bebek islak mendil": (("islak mendil",), ("bebek bezi",)),
+        "biberon": (("biberon", "feeding bottle"), ("biberon fircasi", "biberon temizleme")),
+        "emzik": (("emzik", "pacifier"), ("emzik askisi", "emzik zinciri")),
+        "mama sandalyesi": (("mama sandalyesi", "high chair"), ()),
+        "bebek bakim urunleri": (("bebek",), ()),
+        "bebek bakim seti": (("bebek",), ()),
+        "fondoten": (("fondoten", "foundation"), ()),
+        "maskara": (("maskara", "rimel", "mascara"), ()),
+        "rimel": (("maskara", "rimel", "mascara"), ()),
+        "ruj": (("ruj", "lipstick"), ()),
+        "kapatici": (("kapatici", "concealer"), ()),
+        "concealer": (("kapatici", "concealer"), ()),
+        "allik": (("allik", "blush"), ()),
+        "far paleti": (("far", "eyeshadow"), ()),
+        "goz fari paleti": (("far", "eyeshadow"), ()),
+        "parfum": (("parfum", "eau de parfum", "eau de toilette", "edp", "edt"), ("parfum sisesi", "parfum atomizer")),
+        "cilt bakim": (("cilt", "yuz", "serum", "nemlendirici", "tonik", "cleanser"), ()),
+        "cilt bakim seti": (("cilt", "yuz", "serum", "nemlendirici", "tonik", "cleanser"), ()),
+        "sampuan": (("sampuan", "shampoo"), ()),
+        "sac bakim": (("sac", "shampoo", "sampuan"), ()),
+        "gunes kremi": (("gunes", "spf", "sun screen", "sunscreen"), ()),
+        "gunes koruyucu": (("gunes", "spf", "sun screen", "sunscreen"), ()),
+        "deodorant": (("deodorant", "antiperspirant"), ()),
+        "saklama kabi": (("saklama", "storage container"), ()),
+        "gida saklama kabi": (("saklama", "storage container"), ()),
+        "tava": (("tava", "pan"), ()),
+        "tencere": (("tencere", "pot"), ()),
+        "tencere seti": (("tencere",), ()),
+        "nevresim": (("nevresim", "duvet"), ()),
+        "nevresim takimi": (("nevresim",), ()),
+        "havlu": (("havlu", "towel"), ()),
+        "banyo havlusu": (("havlu", "towel"), ()),
+        "camasir deterjani": (("camasir", "laundry"), ("bulasik",)),
+        "bulasik deterjani": (("bulasik",), ("camasir",)),
+        "bulasik makinesi tableti": (("bulasik", "dishwasher"), ("camasir",)),
+        "bulasik tableti": (("bulasik", "dishwasher"), ("camasir",)),
+        "ev temizlik urunleri": (("temiz", "cleaner", "deterjan"), ()),
+        "yuzey temizleyici": (("yuzey", "surface cleaner"), ()),
+        "tuvalet kagidi": (("tuvalet kagidi", "toilet paper"), ("kagit havlu",)),
+        "kagit havlu": (("kagit havlu", "paper towel"), ("tuvalet kagidi",)),
+        "kahve": (("kahve", "coffee"), ("kahve makinesi", "kahve ogutucu", "french press", "filtre kagidi")),
+        "filtre kahve": (("kahve", "coffee"), ("kahve makinesi", "filtre kagidi")),
+        "cekirdek kahve": (("kahve", "coffee"), ("kahve makinesi",)),
+        "kahve ekipmanlari": (("kahve", "coffee", "french press", "ogutucu"), ()),
+        "french press": (("french press",), ()),
+        "kahve ogutucu": (("ogutucu", "grinder"), ()),
+        "mutfak gerecleri": (("mutfak", "kitchen"), ()),
+        "mutfak seti": (("mutfak", "kitchen"), ()),
+        "cep telefonu": (("telefon", "iphone", "galaxy", "redmi", "poco", "smartphone"), ("kilif", "ekran koruyucu", "sarj aleti")),
+        "bluetooth kulaklik": (("kulaklik", "earbuds", "headphone"), ("kilif", "yedek ped")),
+        "kulak ustu kulaklik": (("kulaklik", "headphone", "headset"), ("kulaklik stand", "yedek ped")),
+        "bluetooth hoparlor": (("hoparlor", "speaker"), ("hoparlor kilifi",)),
+        "akilli saat": (("akilli saat", "smartwatch", "watch"), ("saat kayisi", "ekran koruyucu")),
+        "laptop": (("laptop", "notebook", "macbook", "dizustu"), ("laptop cantasi", "laptop stand", "kilif")),
+        "monitor": (("monitor",), ("monitor kolu", "monitor standi")),
+        "ssd": (("ssd", "solid state"), ("ssd kutusu", "ssd enclosure")),
+        "klavye": (("klavye", "keyboard"), ("tus seti", "keycap")),
+        "mouse": (("mouse", "fare"), ("mouse pad", "mousepad")),
+        "oyun kolu": (("oyun kolu", "gamepad", "controller"), ("stand", "kilif")),
+        "televizyon": (("televizyon", " television", " tv "), ("tv unitesi", "askı aparati", "aski aparati")),
+        "powerbank": (("powerbank", "power bank", "tasinabilir sarj"), ("kilif",)),
+        "sarj aleti": (("sarj", "charger", "adapter", "adaptor"), ("kablo", "cable")),
+        "sarj adaptoru": (("sarj", "charger", "adapter", "adaptor"), ("kablo", "cable")),
+        "modem": (("modem", "router"), ("anten",)),
+        "router": (("router", "modem"), ("anten",)),
+        "robot supurge": (("robot supurge", "robot vacuum"), ("yedek", "filtre", "firca", "mop bezi", "toz torbasi")),
+        "dikey supurge": (("dikey supurge", "sarjli supurge", "stick vacuum"), ("yedek", "filtre", "firca", "batarya")),
+        "kahve makinesi": (("kahve makinesi", "espresso makinesi", "turk kahve makinesi", "coffee machine"), ("kirec", "temizleyici", "tablet", "filtre kagidi", "kahve kagidi", "filtre yedek", "yedek filtre", "su filtresi", "aquaclean", "bakim seti", "temizlik seti", "kapsul stand", "kahve kapsulu", "kahve cekirdegi", "ogutulmus kahve", "kokteyl makinesi")),
+        "airfryer": (("airfryer", "air fryer", "sicak hava fritoz"), ("pisirme kagidi", "silikon hazne", "aksesuar")),
+        "blender": (("blender",), ("yedek", "bicak", "hazne")),
+        "tost makinesi": (("tost makinesi", "sandvic makinesi", "grill"), ("yedek plaka",)),
+        "kettle": (("kettle", "su isitici"), ("yedek",)),
+        "sac kurutma makinesi": (("sac kurutma", "hair dryer"), ("difuzor", "baslik")),
+        "tiras makinesi": (("tiras makinesi", "shaver", "trimmer"), ("yedek baslik", "yedek bicak")),
+        "elektrikli dis fircasi": (("elektrikli dis fircasi", "electric toothbrush"), ("yedek baslik", "firca basi")),
+        "oyuncak": (("oyuncak", "toy"), ()),
+        "lego": (("lego",), ()),
+        "yapi oyuncaklari": (("lego", "yapi oyuncak", "blok"), ()),
+        "kedi mamasi": (("kedi mama", "cat food"), ("kopek mama", "kum", "odul")),
+        "kopek mamasi": (("kopek mama", "dog food"), ("kedi mama", "odul")),
+        "el aletleri": (("alet", "matkap", "tornavida", "testere", "anahtar"), ()),
+        "elektrikli el aletleri": (("matkap", "testere", "taslama", "vidalama", "elektrikli"), ()),
+        "otomobil aksesuarlari": (("arac", "oto", "otomobil", "car"), ()),
+        "arac ici aksesuar": (("arac", "oto", "otomobil", "car"), ()),
+        "fitness ekipmanlari": (("fitness", "dambıl", "dambil", "halter", "direnc", "egzersiz", "yoga"), ()),
+        "spor ekipmanlari": (("spor", "fitness", "dambıl", "dambil", "halter", "egzersiz", "yoga"), ()),
     }
+
     rule = rules.get(q)
     if not rule:
-        return True, None
+        # Fail closed for category queries: a newly-added query must get an
+        # explicit rule before its search results are allowed into persistence.
+        return False, "category-rule-missing"
 
-    for token in rule.get("exclude_any", ()):
-        if token in title:
+    required, excluded = rule
+    for token in excluded:
+        if normalize_text(token) in title:
             return False, f"excluded:{token}"
-    required = rule.get("require_any", ())
-    if required and not any(token in title for token in required):
+    if required and not any(normalize_text(token) in title for token in required):
         return False, "category-term-missing"
     return True, None
-
 
 def filter_category_products(query, products):
     kept = []
