@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "categories": [
     {
       "name": "Termos / Matara",
@@ -110,8 +110,8 @@
       ]
     },
     {
-      "name": "Makyaj",
-      "slug": "makyaj",
+      "name": "Güzellik & Kişisel Bakım",
+      "slug": "guzellik-kisisel-bakim",
       "active": true,
       "stores": [
         "Trendyol",
@@ -168,6 +168,49 @@
           "queries": [
             "far paleti",
             "göz farı paleti"
+          ]
+        },
+        {
+          "name": "Parfüm",
+          "slug": "parfum",
+          "active": true,
+          "queries": [
+            "parfüm"
+          ]
+        },
+        {
+          "name": "Cilt Bakımı",
+          "slug": "cilt-bakimi",
+          "active": true,
+          "queries": [
+            "cilt bakım",
+            "cilt bakım seti"
+          ]
+        },
+        {
+          "name": "Şampuan / Saç Bakımı",
+          "slug": "sampuan-sac-bakimi",
+          "active": true,
+          "queries": [
+            "şampuan",
+            "saç bakım"
+          ]
+        },
+        {
+          "name": "Güneş Kremi",
+          "slug": "gunes-kremi",
+          "active": true,
+          "queries": [
+            "güneş kremi",
+            "güneş koruyucu"
+          ]
+        },
+        {
+          "name": "Deodorant",
+          "slug": "deodorant",
+          "active": true,
+          "queries": [
+            "deodorant"
           ]
         }
       ]
@@ -233,6 +276,62 @@
           "active": true,
           "queries": [
             "bulaşık deterjanı"
+          ]
+        },
+        {
+          "name": "Bulaşık Makinesi Tableti",
+          "slug": "bulasik-makinesi-tableti",
+          "active": true,
+          "queries": [
+            "bulaşık makinesi tableti",
+            "bulaşık tableti"
+          ]
+        },
+        {
+          "name": "Temizlik Ürünleri",
+          "slug": "temizlik-urunleri",
+          "active": true,
+          "queries": [
+            "ev temizlik ürünleri",
+            "yüzey temizleyici"
+          ]
+        },
+        {
+          "name": "Kağıt Ürünleri",
+          "slug": "kagit-urunleri",
+          "active": true,
+          "queries": [
+            "tuvalet kağıdı",
+            "kağıt havlu"
+          ]
+        },
+        {
+          "name": "Kahve",
+          "slug": "kahve",
+          "active": true,
+          "queries": [
+            "kahve",
+            "filtre kahve",
+            "çekirdek kahve"
+          ]
+        },
+        {
+          "name": "Kahve Ekipmanları",
+          "slug": "kahve-ekipmanlari",
+          "active": true,
+          "queries": [
+            "kahve ekipmanları",
+            "french press",
+            "kahve öğütücü"
+          ]
+        },
+        {
+          "name": "Mutfak Gereçleri",
+          "slug": "mutfak-gerecleri",
+          "active": true,
+          "queries": [
+            "mutfak gereçleri",
+            "mutfak seti"
           ]
         }
       ]
@@ -356,6 +455,35 @@
           "queries": [
             "televizyon"
           ]
+        },
+        {
+          "name": "Powerbank",
+          "slug": "powerbank",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "powerbank"
+          ]
+        },
+        {
+          "name": "Şarj Aleti / Adaptör",
+          "slug": "sarj-aleti-adaptor",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "şarj aleti",
+            "şarj adaptörü"
+          ]
+        },
+        {
+          "name": "Modem / Router",
+          "slug": "modem-router",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "modem",
+            "router"
+          ]
         }
       ]
     },
@@ -465,6 +593,114 @@
           "strict_match": "model",
           "queries": [
             "elektrikli diş fırçası"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Oyuncak & Hobi",
+      "slug": "oyuncak-hobi",
+      "active": true,
+      "stores": [
+        "Trendyol",
+        "Hepsiburada",
+        "n11"
+      ],
+      "subcategories": [
+        {
+          "name": "Oyuncak",
+          "slug": "oyuncak",
+          "active": true,
+          "queries": [
+            "oyuncak"
+          ]
+        },
+        {
+          "name": "LEGO / Yapı Oyuncakları",
+          "slug": "lego-yapi-oyuncaklari",
+          "active": true,
+          "queries": [
+            "lego",
+            "yapı oyuncakları"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Evcil Hayvan",
+      "slug": "evcil-hayvan",
+      "active": true,
+      "stores": [
+        "Trendyol",
+        "Hepsiburada",
+        "n11"
+      ],
+      "subcategories": [
+        {
+          "name": "Kedi Maması",
+          "slug": "kedi-mamasi",
+          "active": true,
+          "queries": [
+            "kedi maması"
+          ]
+        },
+        {
+          "name": "Köpek Maması",
+          "slug": "kopek-mamasi",
+          "active": true,
+          "queries": [
+            "köpek maması"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Otomotiv & Yapı Market",
+      "slug": "otomotiv-yapi-market",
+      "active": true,
+      "stores": [
+        "Trendyol",
+        "Hepsiburada",
+        "n11"
+      ],
+      "subcategories": [
+        {
+          "name": "El Aletleri",
+          "slug": "el-aletleri",
+          "active": true,
+          "queries": [
+            "el aletleri",
+            "elektrikli el aletleri"
+          ]
+        },
+        {
+          "name": "Otomobil Aksesuarları",
+          "slug": "otomobil-aksesuarlari",
+          "active": true,
+          "queries": [
+            "otomobil aksesuarları",
+            "araç içi aksesuar"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Spor & Fitness",
+      "slug": "spor-fitness",
+      "active": true,
+      "stores": [
+        "Trendyol",
+        "Hepsiburada",
+        "n11"
+      ],
+      "subcategories": [
+        {
+          "name": "Spor / Fitness",
+          "slug": "spor-fitness-urunleri",
+          "active": true,
+          "queries": [
+            "fitness ekipmanları",
+            "spor ekipmanları"
           ]
         }
       ]
