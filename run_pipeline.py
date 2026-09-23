@@ -62,8 +62,25 @@ def load_active_subcategories():
             )
 
     only_slug = os.getenv("CATEGORY_SLUG", "").strip()
+    only_slugs_raw = os.getenv("CATEGORY_SLUGS", "").strip()
+
+    if only_slug and only_slugs_raw:
+        raise RuntimeError("CATEGORY_SLUG ve CATEGORY_SLUGS aynı anda kullanılamaz.")
+
     if only_slug:
         rows = [r for r in rows if r["subcategory_slug"] == only_slug]
+
+    if only_slugs_raw:
+        requested_slugs = [slug.strip() for slug in only_slugs_raw.split(",") if slug.strip()]
+        requested_set = set(requested_slugs)
+        available_set = {r["subcategory_slug"] for r in rows}
+        unknown_slugs = [slug for slug in requested_slugs if slug not in available_set]
+        if unknown_slugs:
+            raise RuntimeError(
+                "CATEGORY_SLUGS içinde bilinmeyen alt kategori var: "
+                + ", ".join(unknown_slugs)
+            )
+        rows = [r for r in rows if r["subcategory_slug"] in requested_set]
 
     category_limit_raw = os.getenv("CATEGORY_LIMIT", "").strip()
     if category_limit_raw:
