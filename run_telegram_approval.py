@@ -265,6 +265,7 @@ def keyboard(candidate_id):
         "inline_keyboard": [[
             {"text": "🚀 PAYLAŞ", "callback_data": f"publish:{candidate_id}"},
             {"text": "❌ REDDET", "callback_data": f"reject:{candidate_id}"},
+            {"text": "🟢 WHATSAPP", "callback_data": f"whatsapp:{candidate_id}"},
         ]]
     }
 
@@ -442,6 +443,23 @@ def handle_callback(query):
             print(f"APPROVAL PUBLISH DONE | {candidate_id} | " + " | ".join(results))
         except Exception as exc:
             print(f"APPROVAL PUBLISH ERROR | {candidate_id} | {exc}")
+    elif action == "whatsapp":
+        answer_callback(callback_id, "WhatsApp paylaşım paketi hazırlanıyor.")
+        try:
+            data = load_candidate_for_publish(candidate_id)
+            outputs = render_candidate_bundle(data)
+            with open(outputs["instagram"], "rb") as image:
+                api(
+                    "sendPhoto",
+                    data={
+                        "chat_id": APPROVAL_CHAT_ID,
+                        "caption": facebook_caption(data),
+                    },
+                    files={"photo": image},
+                )
+            print(f"APPROVAL WHATSAPP READY | {candidate_id}")
+        except Exception as exc:
+            print(f"APPROVAL WHATSAPP ERROR | {candidate_id} | {exc}")
     elif action == "reject":
         try:
             persist_rejection(candidate_id)
