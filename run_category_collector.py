@@ -149,7 +149,10 @@ def normalize_text(value):
 def category_relevant(query, product):
     """Reject obvious search leakage before any product is persisted."""
     q = normalize_text(query)
-    title = normalize_text(product.get("title"))
+    # Turkish dotless ı survives NFKD/casefold. Canonicalize it so rules can
+    # safely use ASCII keys/tokens (maması -> mamasi, şarj -> sarj, etc.).
+    q = q.replace("ı", "i")
+    title = normalize_text(product.get("title")).replace("ı", "i")
     if not title:
         return False, "empty-title"
 
@@ -261,10 +264,15 @@ def category_relevant(query, product):
 
     required, excluded = rule
     for token in excluded:
-        if normalize_text(token) in title:
+        normalized_token = normalize_text(token).replace("ı", "i")
+        if normalized_token in title:
             return False, f"excluded:{token}"
-    if required and not any(normalize_text(token) in title for token in required):
-        return False, "category-term-missing"
+
+    # Search engines already rank by the requested category. A mandatory
+    # positive keyword in every title creates false negatives (e.g. LEGO,
+    # Hot Wheels, or 'Güç Bankası' without the literal word powerbank).
+    # Keep positive terms as documentation/diagnostics and reject only known
+    # leakage/accessory signals here. Matcher/validation remain downstream.
     return True, None
 
 def filter_category_products(query, products):
