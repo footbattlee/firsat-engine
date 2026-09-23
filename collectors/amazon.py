@@ -583,6 +583,7 @@ def save_products_to_supabase(products):
             "price": price,
             "old_price": item.get("old_price"),
             "product_url": item["product_url"],
+            "affiliate_url": item.get("affiliate_url"),
             "image_url": item.get("image_url"),
             "currency": "TRY",
             "in_stock": True,
