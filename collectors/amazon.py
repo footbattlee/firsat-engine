@@ -245,13 +245,45 @@ def fetch_playwright(url):
             page.wait_for_timeout(2500)
             html = page.content()
             blocked = looks_blocked(html)
+
+            # Diagnostic: distinguish a real bot/CAPTCHA block from cookie/consent
+            # overlays or a false-positive marker while search results are present.
+            lower_html = (html or "").casefold()
+            block_markers = (
+                "captcha",
+                "robot check",
+                "automated access",
+                "enter the characters you see below",
+                "üzgünüz",
+            )
+            matched_markers = [marker for marker in block_markers if marker in lower_html]
+            search_result_count = page.locator(
+                "[data-component-type='s-search-result'][data-asin]"
+            ).count()
+            asin_node_count = page.locator("[data-asin]").count()
+            captcha_element_count = page.locator(
+                "form[action*='validateCaptcha'], img[src*='captcha'], input[name*='captcha' i]"
+            ).count()
+            consent_element_count = page.locator(
+                "#sp-cc, #sp-cc-accept, input[name='accept'], [data-cel-widget*='consent']"
+            ).count()
+
             print(
                 f"AMAZON  | browser search | status={response.status if response else '?'} "
                 f"| blocked={blocked} | title={page.title()!r} | url={page.url}"
             )
+            print(
+                "AMAZON  | diagnostic | "
+                f"markers={matched_markers or 'NONE'} | "
+                f"captcha_elements={captcha_element_count} | "
+                f"consent_elements={consent_element_count} | "
+                f"search_results={search_result_count} | asin_nodes={asin_node_count}"
+            )
+
             if blocked:
                 body = (page.locator("body").inner_text(timeout=3000) or "").replace("\\n", " ")
-                print(f"AMAZON  | browser block preview | {body[:220]!r}")
+                print(f"AMAZON  | browser block preview | {body[:500]!r}")
+                save_debug_html(html, "browser_blocked")
 
             browser.close()
             if html and not blocked:
