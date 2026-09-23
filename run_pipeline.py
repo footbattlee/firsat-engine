@@ -19,7 +19,9 @@ COLLECTORS = [
 ]
 
 POST_STEPS = [
-    ("MATCH", "Product Matcher", ROOT / "matching" / "product_matcher.py"),
+    # apply_matches imports and runs the same matcher before persisting matches,
+    # so running product_matcher.py separately here duplicated the expensive
+    # full matching pass on every pipeline execution.
     ("MATCH", "Apply Matches", ROOT / "matching" / "apply_matches.py"),
     ("DEAL", "Deal Engine", ROOT / "deals" / "deal_engine.py"),
 ]
