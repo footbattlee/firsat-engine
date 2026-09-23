@@ -92,6 +92,25 @@ def load_active_subcategories():
         except ValueError:
             raise RuntimeError("CATEGORY_LIMIT tam sayı olmalı.")
 
+    store_filter_raw = os.getenv("STORE_FILTER", "").strip()
+    if store_filter_raw:
+        requested_stores = [store.strip() for store in store_filter_raw.split(",") if store.strip()]
+        known_stores = {name for name, _ in COLLECTORS}
+        unknown_stores = [store for store in requested_stores if store not in known_stores]
+        if unknown_stores:
+            raise RuntimeError(
+                "STORE_FILTER içinde bilinmeyen mağaza var: "
+                + ", ".join(unknown_stores)
+            )
+
+        requested_store_set = set(requested_stores)
+        for row in rows:
+            row["stores"] = [
+                store for store in row["stores"] if store in requested_store_set
+            ]
+
+        rows = [row for row in rows if row["stores"]]
+
     return rows
 
 
@@ -244,7 +263,8 @@ def main():
     print("FIRSAT ENGINE - MULTI CATEGORY PIPELINE")
     print("=" * 96)
     print(f"Aktif alt kategori: {len(categories)}")
-    print(f"Mağaza: {len(COLLECTORS)}")
+    selected_stores = sorted({store for category in categories for store in category["stores"]})
+    print(f"Mağaza: {len(selected_stores)} | {', '.join(selected_stores)}")
     total_collector_runs = sum(len(category["stores"]) for category in categories)
     print(f"Toplam collector çalışması: {total_collector_runs}")
     print("Akış: Tüm kategoriler/mağazalar -> Product Matcher -> Apply Matches -> Deal Engine")
