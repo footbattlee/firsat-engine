@@ -106,9 +106,14 @@ def canonical_product_url(asin):
 def looks_blocked(html):
     lower = (html or "").casefold()
     markers = (
-        "captcha", "robot check", "automated access",
-        "enter the characters you see below", "üzgünüz",
+        "captcha",
+        "robot check",
+        "automated access",
+        "enter the characters you see below",
     )
+    # "üzgünüz" tek başına blok göstergesi değildir; normal Amazon/çerez
+    # metinlerinde de geçebiliyor ve gerçek arama sonuçlarını yanlış pozitif
+    # olarak engellenmiş saymamıza neden oluyor.
     return any(x in lower for x in markers)
 
 
