@@ -25,6 +25,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 PROXY_SERVER = os.getenv("PROXY_SERVER", "").strip()
 PROXY_USERNAME = os.getenv("PROXY_USERNAME", "").strip()
 PROXY_PASSWORD = os.getenv("PROXY_PASSWORD", "").strip()
+AMAZON_ASSOCIATE_TAG = os.getenv("AMAZON_ASSOCIATE_TAG", "anlikindirimr-21").strip()
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
@@ -101,6 +102,26 @@ def extract_asin(url):
 
 def canonical_product_url(asin):
     return f"{BASE_URL}/dp/{asin}"
+
+
+def affiliate_product_url(asin):
+    """Build Amazon's simple tagged direct-product affiliate link."""
+    if not AMAZON_ASSOCIATE_TAG:
+        return None
+    return f"{BASE_URL}/dp/{asin}/ref=nosim?tag={AMAZON_ASSOCIATE_TAG}"
+
+
+def clean_brand(raw):
+    """Normalize Amazon byline text to a plain brand name."""
+    if not raw:
+        return None
+    brand = str(raw).strip()
+    brand = re.sub(r"(?i)^marka:\s*", "", brand)
+    brand = re.sub(r"(?i)^şu\s+mağazayı\s+ziyaret\s+edin:\s*", "", brand)
+    brand = re.sub(r"(?i)\s+(?:store[’']?u|mağazası(?:nı)?)\s+ziyaret\s+edin\s*$", "", brand)
+    brand = re.sub(r"(?i)\s+store\s*$", "", brand)
+    brand = re.sub(r"\s+", " ", brand).strip(" :-")
+    return brand or None
 
 
 def looks_blocked(html):
@@ -379,6 +400,7 @@ def parse_search_results(html, limit):
             "old_price": old_price,
             "image_url": image,
             "product_url": canonical_product_url(asin),
+            "affiliate_url": affiliate_product_url(asin),
         })
         if len(products) >= limit:
             break
@@ -396,11 +418,9 @@ def enrich_product(item, session):
         item["title"] = title.strip()
 
     brand_text = first_text(soup, ["#bylineInfo"])
-    if brand_text:
-        brand = re.sub(r"(?i)^(marka:\s*|şu mağazayı ziyaret edin:\s*)", "", brand_text)
-        brand = re.sub(r"(?i)\s+store$", "", brand).strip(" :")
-        if brand:
-            item["brand"] = brand
+    brand = clean_brand(brand_text)
+    if brand:
+        item["brand"] = brand
 
     image = first_attr(soup, ["#landingImage", "#imgBlkFront", "img.a-dynamic-image"], "data-old-hires")
     image = image or first_attr(soup, ["#landingImage", "#imgBlkFront", "img.a-dynamic-image"], "src")
