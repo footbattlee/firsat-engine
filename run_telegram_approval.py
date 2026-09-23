@@ -294,6 +294,12 @@ def send_candidate(data):
 
     outputs = render_candidate_bundle(data)
     preview = outputs["instagram"]
+    # Prepare Story asset while the candidate is being dispatched. The cloud
+    # PAYLAS webhook cannot render Python creatives, so it reads this file later.
+    try:
+        upload_story_assist(data["id"], outputs["story"])
+    except Exception as exc:
+        print(f"STORY PREP WARNING | {data['id']} | {exc}")
     with open(preview, "rb") as image:
         result = api(
             "sendPhoto",
