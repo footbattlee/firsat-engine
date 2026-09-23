@@ -524,10 +524,9 @@ def pair_score(a, b):
     if vol_a is not None and vol_b is not None and abs(vol_a - vol_b) > VOLUME_TOLERANCE_ML:
         return 0.0, "volume-conflict"
 
-    colors_a = extract_colors(a["title"])
-    colors_b = extract_colors(b["title"])
-    if colors_a and colors_b and colors_a.isdisjoint(colors_b):
-        return 0.0, "color-conflict"
+    # Color is not a product-identity blocker for Fiyatzade. Different colors
+    # of the same model may be compared; model/capacity/GTIN/critical variants
+    # remain protected by the stricter checks below.
 
     model_ok, model_reason = model_evidence_compatible(a, b)
     if not model_ok:
