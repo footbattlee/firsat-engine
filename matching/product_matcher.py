@@ -601,19 +601,41 @@ def load_rows():
 
 
 def build_groups(rows):
+    # pair_score() can only accept pairs from different merchants with the same
+    # normalized brand. Bucket up front instead of evaluating every offer
+    # against every other offer in the database (O(n^2)).
+    brand_buckets = {}
+    for idx, row in enumerate(rows):
+        brand = normalize_brand(row.get("brand"))
+        if not brand:
+            continue
+        brand_buckets.setdefault(brand, []).append(idx)
+
     pair_cache = {}
     accepted_edges = []
 
-    for i in range(len(rows)):
-        for j in range(i + 1, len(rows)):
-            score, reason = pair_score(rows[i], rows[j])
-            pair_cache[(i, j)] = (score, reason)
-            if score >= MIN_SCORE:
-                accepted_edges.append((score, reason, i, j))
+    for indexes in brand_buckets.values():
+        if len(indexes) < 2:
+            continue
+        merchants = {rows[i]["merchant_id"] for i in indexes}
+        if len(merchants) < 2:
+            continue
+
+        for pos, i in enumerate(indexes):
+            for j in indexes[pos + 1:]:
+                if rows[i]["merchant_id"] == rows[j]["merchant_id"]:
+                    continue
+                score, reason = pair_score(rows[i], rows[j])
+                pair_cache[(i, j)] = (score, reason)
+                if score >= MIN_SCORE:
+                    accepted_edges.append((score, reason, i, j))
 
     accepted_edges.sort(key=lambda x: -x[0])
-    groups = [{i} for i in range(len(rows))]
-    group_of = {i: i for i in range(len(rows))}
+
+    # Only rows participating in an accepted edge need group state.
+    active_indexes = {i for _, _, i, j in accepted_edges for i in (i, j)}
+    groups = {i: {i} for i in active_indexes}
+    group_of = {i: i for i in active_indexes}
 
     def cached_pair(i, j):
         key = (i, j) if i < j else (j, i)
@@ -641,7 +663,7 @@ def build_groups(rows):
             group_of[idx] = gi
 
     result = []
-    for indexes_set in groups:
+    for indexes_set in groups.values():
         if len(indexes_set) < 2:
             continue
         indexes = sorted(indexes_set)
@@ -657,7 +679,6 @@ def build_groups(rows):
 
     result.sort(key=lambda x: (-x[0], -len(x[1])))
     return result
-
 
 def print_technology_inventory(rows):
     if not DEBUG_REJECTS:
