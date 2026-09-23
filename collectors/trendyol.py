@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import random
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError
@@ -14,6 +15,8 @@ BASE_URL = "https://www.trendyol.com"
 SEARCH_URL = BASE_URL + "/sr?q={query}"
 DEFAULT_QUERY = "termos matara"
 LIMIT = 20
+MAX_BLOCK_RETRIES = int(os.getenv("TRENDYOL_BLOCK_RETRIES", "2"))
+BLOCK_RETRY_BASE_MS = int(os.getenv("TRENDYOL_BLOCK_RETRY_BASE_MS", "5000"))
 
 SUPABASE_URL = os.getenv(
     "SUPABASE_URL",
@@ -390,6 +393,40 @@ def save_products_to_supabase(products):
     return saved
 
 
+
+
+async def page_is_blocked(page, response=None):
+    status = response.status if response else None
+    try:
+        title = (await page.title()).casefold()
+    except Exception:
+        title = ""
+    try:
+        body = (await page.locator("body").inner_text()).casefold()[:4000]
+    except Exception:
+        body = ""
+    markers = ("güvenlik doğrulaması", "guvenlik dogrulamasi", "bir dakika lütfen", "bir dakika lutfen", "cloudflare", "ray id")
+    return status in (403, 429) or any(marker in title or marker in body for marker in markers)
+
+
+async def open_search_with_recovery(context, url):
+    """Retry transient Trendyol challenge pages without attempting to bypass CAPTCHA."""
+    page = await context.new_page()
+    for attempt in range(MAX_BLOCK_RETRIES + 1):
+        if attempt:
+            wait_ms = BLOCK_RETRY_BASE_MS * attempt + random.randint(500, 1800)
+            print(f"RECOVERY | Trendyol challenge retry {attempt}/{MAX_BLOCK_RETRIES} | wait={wait_ms}ms")
+            await page.wait_for_timeout(wait_ms)
+        print(f"Opening: {url}" if attempt == 0 else f"Re-opening: {url}")
+        response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        print("HTTP status:", response.status if response else None)
+        await page.wait_for_timeout(4000)
+        if not await page_is_blocked(page, response):
+            return page, response
+        print("BLOCKED | Trendyol güvenlik doğrulaması algılandı.")
+    return page, response
+
+
 async def extract_card(card):
     href = await get_product_href(card)
     if not href:
@@ -448,13 +485,17 @@ async def main():
                 "Chrome/140.0.0.0 Safari/537.36"
             ),
         )
-        page = await context.new_page()
+        page, response = await open_search_with_recovery(context, url)
+        if await page_is_blocked(page, response):
+            title = await page.title()
+            body_text = (await page.locator("body").inner_text())[:1000]
+            print("BLOCKED FINAL | Trendyol challenge devam ediyor; bu koşuda collector güvenli şekilde atlanıyor.")
+            print("Page title:", title)
+            print("Body preview:", body_text)
+            Path("trendyol_products.json").write_text("[]", encoding="utf-8")
+            await browser.close()
+            raise SystemExit(2)
 
-        print(f"Opening: {url}")
-        response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        print("HTTP status:", response.status if response else None)
-
-        await page.wait_for_timeout(4000)
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3)")
         await page.wait_for_timeout(2000)
 
