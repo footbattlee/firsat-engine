@@ -356,6 +356,8 @@ def main():
         raise SystemExit(run_sync_collector(module, query))
 
     # Playwright tabanlı collector'larda browser launch seviyesinde aynı proxy uygulanır.
+    # Inject the same pre-persistence category gate used by sync collectors.
+    module.CATEGORY_FILTER = filter_category_products
     enable_playwright_proxy(module, settings)
     raise SystemExit(run_async_collector(module, query))
 
