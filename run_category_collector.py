@@ -148,7 +148,7 @@ def run_sync_collector(module, query: str) -> int:
 
     result = {
         "ok": bool(products),
-        "source": getattr(module, "DEFAULT_QUERY", module.__name__),
+        "source": module.__name__,
         "query": query,
         "count": len(products),
         "products": products,
