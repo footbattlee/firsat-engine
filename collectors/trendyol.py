@@ -554,6 +554,15 @@ async def main():
     if not products:
         raise SystemExit(3)
 
+    # run_category_collector injects the shared relevance gate at runtime so
+    # Trendyol is filtered before persistence just like sync collectors.
+    category_filter = globals().get("CATEGORY_FILTER")
+    if callable(category_filter):
+        products = category_filter(DEFAULT_QUERY, products)
+        if not products:
+            print(f"EMPTY | Category filter removed all Trendyol results: {DEFAULT_QUERY}")
+            return
+
     save_products_to_supabase(products)
 
 
