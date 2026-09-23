@@ -118,6 +118,24 @@ def clean_gtin(product):
     return None
 
 
+def extract_model_codes(value):
+    raw = unicodedata.normalize("NFKD", (value or "").upper())
+    raw = "".join(ch for ch in raw if not unicodedata.combining(ch))
+    # Require both letters and digits; keep slash model suffixes such as EP5544/80.
+    candidates = re.findall(r"\b[A-Z]{1,10}[A-Z0-9.-]*\d[A-Z0-9.-]*(?:/\d{1,4})?\b", raw)
+    return {re.sub(r"[^A-Z0-9/]", "", x) for x in candidates if len(re.sub(r"[^A-Z0-9/]", "", x)) >= 4}
+
+
+def title_url_model_compatible(title, product_url):
+    title_models = extract_model_codes(title)
+    url_models = extract_model_codes(urlparse(product_url).path.replace("-", " "))
+    if not title_models or not url_models:
+        return True, None
+    if title_models.isdisjoint(url_models):
+        return False, f"title_models={sorted(title_models)} url_models={sorted(url_models)}"
+    return True, None
+
+
 def parse_product_page(product_url, html):
     product = product_json_ld(html)
     if not product: return None
@@ -150,6 +168,10 @@ def collect(query=DEFAULT_QUERY, limit=LIMIT):
                 print(f"[{i}/{len(urls)}] SKIP: {url}"); continue
             if not title_matches_query(item["title"], query):
                 print(f"[{i}/{len(urls)}] IRRELEVANT: {item['title'][:80]}"); continue
+            model_ok, model_reason = title_url_model_compatible(item["title"], item["product_url"])
+            if not model_ok:
+                print(f"[{i}/{len(urls)}] HARD FAIL TITLE/URL MODEL: {model_reason} | {item['title'][:80]} | {item['product_url']}")
+                continue
             if item["merchant_product_id"] in seen_skus:
                 print(f"[{i}/{len(urls)}] DUPLICATE SKU: {item['merchant_product_id']}"); continue
             seen_skus.add(item["merchant_product_id"]); products.append(item)
