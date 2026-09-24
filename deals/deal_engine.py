@@ -94,7 +94,7 @@ def in_analysis_scope(title, terms):
     if not terms:
         return True
     title_tokens = set(normalize_text(title).split())
-    return any(title_tokens.intersection(set(term.split())) for term in terms if term)
+    return any(set(term.split()).issubset(title_tokens) for term in terms if term)
 
 
 def load_data():
