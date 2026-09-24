@@ -281,9 +281,16 @@ def category_relevant(query, product):
         return False, "category-rule-missing"
 
     required, excluded = rule
+    normalized_required = [
+        normalize_text(token).replace("ı", "i") for token in required
+    ]
+    has_positive_evidence = bool(normalized_required) and any(
+        token in title for token in normalized_required
+    )
+
     for token in excluded:
         normalized_token = normalize_text(token).replace("ı", "i")
-        if normalized_token in title:
+        if normalized_token in title and not has_positive_evidence:
             return False, f"excluded:{token}"
 
     # Some store searches leak completely unrelated categories (for example a
@@ -325,10 +332,7 @@ def category_relevant(query, product):
         "dis macunu",
     }
     if q in positive_required_queries:
-        normalized_required = [
-            normalize_text(token).replace("ı", "i") for token in required
-        ]
-        if normalized_required and not any(token in title for token in normalized_required):
+        if normalized_required and not has_positive_evidence:
             return False, "category-term-missing"
 
     # Ambiguous/broad categories remain exclusion-driven. This avoids the
