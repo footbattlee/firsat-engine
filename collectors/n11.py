@@ -17,6 +17,13 @@ DEFAULT_QUERY = os.getenv("N11_QUERY", "termos matara").strip() or "termos matar
 LIMIT = int(os.getenv("N11_LIMIT", "20"))
 REQUEST_TIMEOUT = 30
 REQUEST_DELAY_SECONDS = float(os.getenv("N11_REQUEST_DELAY", "0.35"))
+MAX_RETRIES = max(1, int(os.getenv("N11_MAX_RETRIES", "3")))
+RETRY_BACKOFF_SECONDS = float(os.getenv("N11_RETRY_BACKOFF", "1.5"))
+RETRY_STATUS_CODES = {403, 429, 500, 502, 503, 504}
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+]
 REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
     "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
@@ -201,9 +208,32 @@ def parse_product_page(product_url, html):
 
 
 def fetch(session, url):
-    r = session.get(url, timeout=REQUEST_TIMEOUT)
-    r.raise_for_status()
-    return r
+    last_response = None
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        headers = {
+            "User-Agent": USER_AGENTS[(attempt - 1) % len(USER_AGENTS)],
+            "Referer": BASE_URL + "/",
+        }
+        try:
+            r = session.get(url, timeout=REQUEST_TIMEOUT, headers=headers)
+            last_response = r
+            if r.status_code not in RETRY_STATUS_CODES:
+                r.raise_for_status()
+                return r
+            print(f"N11 RETRY | HTTP {r.status_code} | attempt={attempt}/{MAX_RETRIES} | {url}")
+        except requests.RequestException as exc:
+            last_error = exc
+            print(f"N11 RETRY | {type(exc).__name__} | attempt={attempt}/{MAX_RETRIES} | {url}")
+
+        if attempt < MAX_RETRIES:
+            time.sleep(RETRY_BACKOFF_SECONDS * attempt)
+
+    if last_response is not None:
+        last_response.raise_for_status()
+    if last_error is not None:
+        raise last_error
+    raise requests.RequestException(f"n11 request failed after {MAX_RETRIES} attempts: {url}")
 
 
 def collect(query=DEFAULT_QUERY, limit=LIMIT):
