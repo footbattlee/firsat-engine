@@ -123,7 +123,11 @@ def extract_model_codes(value):
     raw = "".join(ch for ch in raw if not unicodedata.combining(ch))
     # Require both letters and digits; keep slash model suffixes such as EP5544/80.
     candidates = re.findall(r"\b[A-Z]{1,10}[A-Z0-9.-]*\d[A-Z0-9.-]*(?:/\d{1,4})?\b", raw)
-    return {re.sub(r"[^A-Z0-9/]", "", x) for x in candidates if len(re.sub(r"[^A-Z0-9/]", "", x)) >= 4}
+    return {
+        re.sub(r"[^A-Z0-9]", "", x)
+        for x in candidates
+        if len(re.sub(r"[^A-Z0-9]", "", x)) >= 4
+    }
 
 
 def title_url_model_compatible(title, product_url):
