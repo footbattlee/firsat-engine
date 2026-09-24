@@ -93,13 +93,15 @@ def load_data():
     canonical = sb_get("canonical_products", {"select": "id,brand,title,active", "active": "eq.true"})
     matches = sb_get("product_matches", {"select": "canonical_product_id,product_id,status", "status": "eq.approved"})
     variants = sb_get("product_variants", {"select": "id,product_id,active", "active": "eq.true"})
-    offers = sb_get(
-        "offers",
-        {
-            "select": "id,product_variant_id,merchant_id,price,currency,in_stock,product_url",
-            "in_stock": "eq.true",
-        },
-    )
+    offer_params = {
+        "select": "id,product_variant_id,merchant_id,price,currency,in_stock,product_url,last_checked_at",
+        "in_stock": "eq.true",
+    }
+    pipeline_started_at = os.getenv("PIPELINE_STARTED_AT", "").strip()
+    if pipeline_started_at:
+        offer_params["last_checked_at"] = f"gte.{pipeline_started_at}"
+        print(f"DEAL SCOPE | only offers refreshed since {pipeline_started_at}")
+    offers = sb_get("offers", offer_params)
     merchants = sb_get("merchants", {"select": "id,name,slug"})
     existing = sb_get("deal_candidates", {"select": "id,canonical_product_id,status"})
 
@@ -273,7 +275,14 @@ def main():
     insufficient = 0
     now = datetime.now(timezone.utc).isoformat()
 
-    for cid, cproduct in canonical_map.items():
+    pipeline_scoped = bool(os.getenv("PIPELINE_STARTED_AT", "").strip())
+    canonical_iter = (
+        ((cid, canonical_map[cid]) for cid in grouped if cid in canonical_map)
+        if pipeline_scoped
+        else canonical_map.items()
+    )
+
+    for cid, cproduct in canonical_iter:
         store_offers = best_offer_per_merchant(grouped.get(cid, []))
         title = cproduct.get("title") or cid
 
