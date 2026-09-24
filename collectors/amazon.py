@@ -26,6 +26,9 @@ PROXY_SERVER = os.getenv("PROXY_SERVER", "").strip()
 PROXY_USERNAME = os.getenv("PROXY_USERNAME", "").strip()
 PROXY_PASSWORD = os.getenv("PROXY_PASSWORD", "").strip()
 AMAZON_ASSOCIATE_TAG = os.getenv("AMAZON_ASSOCIATE_TAG", "anlikindirimr-21").strip()
+# Amazon is expected to return products for configured category searches. A blocked/
+# broken fallback must be visible as a failed collector, not a misleading OK/0 result.
+EMPTY_IS_FAILURE = True
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
@@ -194,10 +197,7 @@ def fetch_playwright(url):
 
     try:
         with sync_playwright() as pw:
-            launch_kwargs = {
-                "headless": True,
-                "args": ["--disable-dev-shm-usage"],
-            }
+            launch_kwargs = {"headless": True, "args": ["--disable-dev-shm-usage"]}
             purl = proxy_url()
             if purl:
                 parsed_proxy = urlparse(purl)
@@ -208,6 +208,7 @@ def fetch_playwright(url):
                     launch_kwargs["proxy"]["username"] = parsed_proxy.username
                 if parsed_proxy.password:
                     launch_kwargs["proxy"]["password"] = parsed_proxy.password
+
             browser = pw.chromium.launch(**launch_kwargs)
             context = browser.new_context(
                 locale="tr-TR",
@@ -215,21 +216,14 @@ def fetch_playwright(url):
                 user_agent=random.choice(USER_AGENTS),
                 viewport={"width": 1365, "height": 900},
                 extra_http_headers={"Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"},
+                accept_downloads=False,
             )
             page = context.new_page()
 
-            # Önce ana sayfayı ziyaret ederek Amazon oturum/cookie'lerini oluştur.
-            warm = page.goto(
-                BASE_URL + "/",
-                wait_until="domcontentloaded",
-                timeout=REQUEST_TIMEOUT * 1000,
-            )
-            page.wait_for_timeout(1500)
-            print(
-                f"AMAZON  | browser warmup | status={warm.status if warm else '?'} "
-                f"| title={page.title()!r} | url={page.url}"
-            )
-
+            # Go to the requested search directly. The previous unconditional
+            # home-page warmup could itself return HTTP 202/download content and
+            # trigger chrome-error://chromewebdata before the real search began.
+            response = None
             try:
                 response = page.goto(
                     url,
@@ -237,52 +231,40 @@ def fetch_playwright(url):
                     timeout=REQUEST_TIMEOUT * 1000,
                 )
             except Exception as nav_exc:
-                if "Download is starting" not in str(nav_exc):
-                    raise
-
-                print("AMAZON  | direct search navigation download response; search box fallback")
-                page.goto(
+                print(f"AMAZON  | direct browser navigation failed | {type(nav_exc).__name__}: {nav_exc}")
+                # Controlled fallback: establish a fresh Amazon page only when
+                # direct search navigation failed, then submit the same keyword
+                # through Amazon's own search form. No CAPTCHA solving/bypass.
+                page = context.new_page()
+                home = page.goto(
                     BASE_URL + "/",
-                    wait_until="domcontentloaded",
+                    wait_until="commit",
                     timeout=REQUEST_TIMEOUT * 1000,
                 )
-                page.wait_for_timeout(1000)
-
+                page.wait_for_timeout(1800)
+                print(
+                    f"AMAZON  | fallback home | status={home.status if home else '?'} "
+                    f"| title={page.title()!r} | url={page.url}"
+                )
                 search_box = page.locator("#twotabsearchtextbox").first
                 if not search_box.count():
-                    raise RuntimeError("Amazon search box bulunamadı")
+                    raise RuntimeError("Amazon fallback search box bulunamadı")
 
-                keyword = ""
-                for part in urlparse(url).query.split("&"):
-                    if part.startswith("k="):
-                        keyword = part[2:].replace("+", " ")
-                        break
+                from urllib.parse import parse_qs
+                parsed_query = parse_qs(urlparse(url).query)
+                keyword = (parsed_query.get("k") or parsed_query.get("field-keywords") or [""])[0]
                 if not keyword:
                     raise RuntimeError("Amazon arama sorgusu URL'den çözülemedi")
 
                 search_box.fill(keyword)
-                with page.expect_navigation(
-                    wait_until="domcontentloaded",
-                    timeout=REQUEST_TIMEOUT * 1000,
-                ) as nav:
-                    search_box.press("Enter")
-                response = nav.value
+                search_box.press("Enter")
+                page.wait_for_load_state("domcontentloaded", timeout=REQUEST_TIMEOUT * 1000)
+                response = None
 
             page.wait_for_timeout(2500)
             html = page.content()
             blocked = looks_blocked(html)
-
-            # Diagnostic: distinguish a real bot/CAPTCHA block from cookie/consent
-            # overlays or a false-positive marker while search results are present.
-            lower_html = (html or "").casefold()
-            block_markers = (
-                "captcha",
-                "robot check",
-                "automated access",
-                "enter the characters you see below",
-                "üzgünüz",
-            )
-            matched_markers = [marker for marker in block_markers if marker in lower_html]
+            current_url = page.url
             search_result_count = page.locator(
                 "[data-component-type='s-search-result'][data-asin]"
             ).count()
@@ -290,38 +272,28 @@ def fetch_playwright(url):
             captcha_element_count = page.locator(
                 "form[action*='validateCaptcha'], img[src*='captcha'], input[name*='captcha' i]"
             ).count()
-            consent_element_count = page.locator(
-                "#sp-cc, #sp-cc-accept, input[name='accept'], [data-cel-widget*='consent']"
-            ).count()
-
             print(
                 f"AMAZON  | browser search | status={response.status if response else '?'} "
-                f"| blocked={blocked} | title={page.title()!r} | url={page.url}"
+                f"| blocked={blocked} | title={page.title()!r} | url={current_url}"
             )
             print(
                 "AMAZON  | diagnostic | "
-                f"markers={matched_markers or 'NONE'} | "
                 f"captcha_elements={captcha_element_count} | "
-                f"consent_elements={consent_element_count} | "
                 f"search_results={search_result_count} | asin_nodes={asin_node_count}"
             )
+            browser.close()
 
             if blocked:
-                body = (page.locator("body").inner_text(timeout=3000) or "").replace("\\n", " ")
-                print(f"AMAZON  | browser block preview | {body[:500]!r}")
                 save_debug_html(html, "browser_blocked")
-
-            browser.close()
-            if html and not blocked:
-                if "/s" in urlparse(page.url).path and not looks_like_search_page(html):
-                    save_debug_html(html, "browser_search_unrecognized")
-                    print("AMAZON  | browser page alındı ama arama sonuç DOM'u tanınmadı")
-                else:
-                    return html
+                return None
+            if html and looks_like_search_page(html):
+                return html
+            if html:
+                save_debug_html(html, "browser_search_unrecognized")
+                print("AMAZON  | browser page alındı ama arama sonuç DOM'u tanınmadı")
     except Exception as exc:
         print(f"AMAZON  | Playwright error | {type(exc).__name__}: {exc}")
     return None
-
 
 def fetch_html(url, session, alternates=None):
     candidates = [url] + list(alternates or [])
