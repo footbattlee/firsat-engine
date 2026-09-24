@@ -147,6 +147,178 @@ def normalize_text(value):
     return re.sub(r"[^a-z0-9]+", " ", value).strip()
 
 
+def focused_category_relevant(query, raw_title):
+    """Narrow title rules for the six categories audited in the Amazon log.
+
+    Model names provide positive evidence, never an exemption for accessories.
+    Return None for other categories so their existing behavior stays intact.
+    """
+    evidence = {
+        "oyuncu kulakligi": (
+            r"oyuncu kulakligi|gaming head(?:set|phones?)|headset",
+            r"(?:oyun|oyuncu|gaming|esports?|espor) (?:\w+ ){0,5}kulakli(?:k|gi)",
+            r"razer (?:blackshark|kraken|barracuda)|steelseries arctis|jbl quantum",
+        ),
+        "akilli bileklik": (
+            r"akilli (?:takip )?bilekli(?:k|gi)|smart ?band|mi band|akilli bant",
+            r"huawei band \d+|whoop (?:one|peak|life|[45] 0)|fitbit (?:air|charge|inspire|luxe)",
+            r"fitness (?:band|bilekligi)|aktivite (?:bilekligi|izleyici)",
+        ),
+        "dikey supurge": (
+            r"(?:dikey|dik|sarjli) (?:elektrik(?:li)? )?supurge(?:si)?",
+            r"stick vacuum|cordless (?:stick )?vacuum",
+        ),
+        "sarjli matkap": (
+            r"(?:sarjli|akulu|bataryali|cordless) (?:\w+ ){0,5}(?:matkap|drill)",
+            r"sarjli matkap|akulu matkap|drill|vidalama",
+            r"bosch (?:gsb|gsr) \d+v?(?: \w+){0,2} li",
+        ),
+        "arac kamerasi": (
+            r"arac kamerasi|arac ici kamera|dash ?cam|oto kamera|araba kamerasi",
+        ),
+        "tablet": (r"tablet(?:i)?|ipad|galaxy tab|redmi pad",),
+
+        "yazici": (
+            r"yazici(?:si)?|printer|laserjet|deskjet",
+            r"ecotank|pixma|designjet",
+        ),
+        "tiras makinesi": (
+            r"tiras makinesi|tras makinesi",
+            r"sac sakal (?:kesme |kesim )?makinesi|sakal duzeltici",
+            r"erkek bakim seti|hibrit tiras|oneblade|tiras kiti",
+        ),
+        "elektrikli dis fircasi": (
+            r"(?:elektrikli|sarjli|sarj edilebilir|sonic) (?:\w+ ){0,3}dis fircasi",
+            r"oral-b (?:io|profesyonel temizlik)",
+            r"philips sonicare (?!power flosser)",
+        ),
+        "hava temizleyici": (
+            r"hava temizleyici(?:si)?|hava temizleme cihazi",
+            r"air purifier|air performer|puricare",
+        ),
+    }
+    if query not in evidence:
+        return None
+
+    def matches(pattern, text):
+        return re.search(r"\b(?:" + pattern + r")\b", text)
+
+    def positive(text):
+        return any(matches(pattern, text) for pattern in evidence[query])
+
+    title = normalize_text(raw_title)
+    # Explicit product + accessory bundles are judged by their first component.
+    # Memory sizes (8+128GB), resolutions (4K+2K) and model suffixes (Plus+)
+    # must not be confused with bundle separators.
+    bundle_title = re.sub(r"\bblack\s*\+\s*decker\b", "Black Decker", str(raw_title), flags=re.I)
+    first = re.split(r"(?<!\d)\+(?!\d)|\s+\+\s+", bundle_title, maxsplit=1)[0]
+    first = normalize_text(first)
+    accessory_patterns = {
+        "oyuncu kulakligi": r"yedek|ped(?:i|leri)?|ear ?pads?|cushions?|kilif(?:i)?|case|stand(?:i)?|tutucu(?:su)?|kablosu|cable|mikrofonu",
+        "akilli bileklik": r"yedek|kayis(?:i)?|kordon(?:u)?|strap|wristband|kilif(?:i)?|case|ekran koruyucu(?:su)?|screen protector|sarj (?:cihazi|kablosu)|charger|charging cable",
+        "dikey supurge": r"yedek|filtre(?:si|leri)?|filter|firca(?:si)?|baslik|batarya(?:si)?|battery|sarj cihazi|charger|mop|toz (?:haznesi|torbasi)",
+        "sarjli matkap": r"yedek|(?:matkap|vidalama) uc(?:u|lari)|uc seti|bit set|drill bits?|batarya(?:si)?|battery|sarj cihazi|charger|mandren(?:i)?",
+        "arac kamerasi": r"yedek|hafiza karti|memory card|montaj kiti|hardwire (?:kit|kiti)|kablo(?:su)?|cable|tutacak|tutacagi|bracket|sarj cihazi",
+        "tablet": r"kilif(?:i)?|case|cover|ekran koruyucu(?:su)?|screen protector|kalem uc(?:u|lari)|stand(?:i)?|tutucu(?:su)?|yedek|sarj (?:aleti|cihazi|kablosu)|charger",
+
+        "yazici": r"kartus|toner|murekkep(?:i)?|yazici kafasi|printhead|bakim kutusu|waste ink|yedek parca",
+
+        "tiras makinesi": r"yedek bicak|yedek baslik|tiras basligi|kesici baslik|folyo|foil|tarak seti|sarj (?:aleti|cihazi|kablosu)|charger",
+
+        "elektrikli dis fircasi": r"yedek baslik|firca basligi|replacement head|sarj (?:aleti|cihazi|kablosu)|charger",
+
+        "hava temizleyici": r"yedek filtre|replacement filter|filtre seti|filtre kartusu|uyumlu filtre",
+    }
+
+    # These phrases describe features of a complete device, not a spare part.
+    # Require independent device evidence; numbers/model names on accessories
+    # alone are insufficient.
+    def accessory(text):
+        checked = text
+        if positive(text):
+            if query == "dikey supurge":
+                # Heads, HEPA filtration and a measured dust tank are listed
+                # as features on complete vacuums. Require device evidence
+                # before the feature plus performance/capacity specifications.
+                performance = matches(r"\d+(?: \d+)? ?(?:w|kpa|v|dk|dakika|l)", text)
+                if performance and not matches(r"uyumlu|icin|replacement|yedek|seti", text):
+                    for feature in (r"(?:hepa|yikanabilir) filtre", r"(?:turbo|akilli(?: led)?|precisionpower|aqua plus) baslik", r"\d+ (?:ml|l) toz haznesi"):
+                        for hit in reversed(list(re.finditer(r"\b(?:" + feature + r")\b", checked))):
+                            if positive(checked[:hit.start()]):
+                                checked = checked[:hit.start()] + checked[hit.end():]
+            elif query == "akilli bileklik":
+                checked = re.sub(r"\b(?:kayis|kordon) (?:dahil|hediyeli)\b", "", checked)
+            elif query == "yazici":
+                # "murekkep puskurtmeli" and "murekkep tankli" describe
+                # complete printer technology, not standalone ink.
+                checked = re.sub(
+                    r"\bmurekkep (?:puskurtmeli|tankli)\b",
+                    "",
+                    checked,
+                )
+            elif query == "tiras makinesi":
+                # OneBlade/model evidence alone can also occur on standalone
+                # replacement blades. Only ignore an included spare blade/head
+                # when the title explicitly describes a complete grooming device.
+                if matches(
+                    r"tiras makinesi|tras makinesi|sac sakal (?:kesme |kesim )?makinesi|"
+                    r"sakal duzeltici|erkek bakim seti|hibrit tiras makinesi|tiras kiti",
+                    text,
+                ):
+                    checked = re.sub(
+                        r"\b(?:\d+ )?yedek (?:bicak|baslik)(?: (?:dahil|hediyeli))?\b",
+                        "",
+                        checked,
+                    )
+            elif query == "elektrikli dis fircasi":
+                # Complete toothbrush listings commonly state brush heads and
+                # the charger supplied in the box.
+                checked = re.sub(
+                    r"\b(?:\d+ )?(?:yedek )?(?:firca basligi|baslik)(?: (?:dahil|hediyeli))?\b",
+                    "",
+                    checked,
+                )
+                checked = re.sub(
+                    r"\b(?:hizli manyetik )?sarj cihazi\b",
+                    "",
+                    checked,
+                )
+            elif query == "sarjli matkap":
+                hit = matches(r"(?:celik|anahtarsiz) mandren", checked)
+                if hit and positive(checked[:hit.start()]):
+                    checked = checked[:hit.start()] + checked[hit.end():]
+        return matches(accessory_patterns[query], checked)
+
+    if query == "dikey supurge" and matches(r"robot", title):
+        return False, "excluded:robot"
+
+    if query == "hava temizleyici" and matches(
+        r"nemlendirici|humidifier|difuzor|diffuser|aroma difuzoru",
+        title,
+    ):
+        return False, "excluded:humidifier-diffuser"
+
+    hit = accessory(title)
+    if hit:
+        explicit_bundle = first != title and positive(first) and not accessory(first)
+        # Non-plus tablet bundles need both actual device specifications and
+        # an explicit inclusion phrase. A model-compatible case is not a tablet.
+        tablet_bundle = (
+            query == "tablet"
+            and positive(title)
+            and matches(r"\d+ ?gb", title)
+            and not matches(r"uyumlu|icin|compatible|for", title)
+            and (matches(r"hediyeli", title) or matches(r"klavyeli tablet", title)
+                 or matches(r"tablet pc", title))
+        )
+        if not (explicit_bundle or tablet_bundle):
+            return False, "accessory-only:" + hit.group(0)
+    if not positive(title):
+        return False, "category-term-missing"
+    return True, None
+
+
+
 def category_relevant(query, product):
     """Reject obvious search leakage before any product is persisted."""
     q = normalize_text(query)
@@ -156,6 +328,10 @@ def category_relevant(query, product):
     title = normalize_text(product.get("title")).replace("ı", "i")
     if not title:
         return False, "empty-title"
+
+    focused = focused_category_relevant(q, product.get("title"))
+    if focused is not None:
+        return focused
 
     # Every active category query in categories.json is covered here. Keep the
     # rules title-based and conservative: reject clear accessories/other
@@ -217,13 +393,10 @@ def category_relevant(query, product):
         "kahve ogutucu": (("ogutucu", "grinder"), ()),
         "mutfak gerecleri": (("mutfak", "kitchen"), ()),
         "mutfak seti": (("mutfak", "kitchen"), ()),
-        "tablet": (("tablet", "ipad", "galaxy tab"), ("kilif", "ekran koruyucu", "kalem ucu", "stand")),
         "ram bellek": (("ram", "ddr4", "ddr5", "sodimm", "dimm", "bellek"), ("ram sogutucu",)),
         "oyun konsolu": (("playstation", "ps5", "xbox", "nintendo switch", "oyun konsolu"), ("kilif", "stand", "sarj istasyonu", "oyun kolu", "controller")),
         "yazici": (("yazici", "printer", "laserjet", "deskjet", "ecotank"), ("kartus", "toner", "murekkep", "kagit")),
         "microsd hafiza karti": (("microsd", "micro sd", "hafiza karti", "memory card"), ("kart okuyucu", "card reader", "adapter", "adaptor")),
-        "akilli bileklik": (("akilli bileklik", "smart band", "smartband", "mi band"), ("kayis", "ekran koruyucu")),
-        "oyuncu kulakligi": (("oyuncu kulakligi", "gaming headset", "gaming headphone", "headset"), ("stand", "yedek ped", "kilif")),
         "dijital kamera": (("kamera", "camera", "mirrorless", "dslr"), ("kamera cantasi", "camera bag", "batarya", "pil", "sarj cihazi", "lens kapagi", "tripod")),
         "oyuncu koltugu": (("oyuncu koltugu", "gaming chair"), ("koltuk kilifi", "tekerlek")),
         "ipl epilasyon cihazi": (("ipl", "lumea", "silk expert", "epilasyon"), ("baslik", "kilif")),
@@ -231,8 +404,6 @@ def category_relevant(query, product):
         "hava temizleyici": (("hava temizleyici", "air purifier"), ("filtre", "filter")),
         "buharli utu": (("utu", "iron", "steam iron"), ("utu masasi", "kirec", "temizleyici")),
         "akilli baskul": (("baskul", "tarti", "smart scale"), ()),
-        "sarjli matkap": (("sarjli matkap", "akulu matkap", "drill", "vidalama"), ("matkap ucu", "bit set", "batarya", "sarj cihazi")),
-        "arac kamerasi": (("arac kamerasi", "dash cam", "dashcam", "oto kamera"), ("hafiza karti", "montaj kiti", "kablo")),
         "dis macunu": (("dis macunu", "toothpaste"), ("dis fircasi", "gargara")),
         "cep telefonu": (("telefon", "iphone", "galaxy", "redmi", "poco", "smartphone"), ("kilif", "ekran koruyucu", "sarj aleti")),
         "bluetooth kulaklik": (("kulaklik", "earbuds", "headphone"), ("kilif", "yedek ped")),
@@ -252,7 +423,6 @@ def category_relevant(query, product):
         "modem": (("modem", "router"), ("anten",)),
         "router": (("router", "modem"), ("anten",)),
         "robot supurge": (("robot supurge", "robot vacuum"), ("yedek", "filtre", "firca", "mop bezi", "toz torbasi")),
-        "dikey supurge": (("dikey supurge", "sarjli supurge", "stick vacuum"), ("yedek", "filtre", "firca", "batarya")),
         "kahve makinesi": (("kahve makinesi", "espresso makinesi", "turk kahve makinesi", "coffee machine"), ("kirec", "temizleyici", "tablet", "filtre kagidi", "kahve kagidi", "filtre yedek", "yedek filtre", "su filtresi", "aquaclean", "bakim seti", "temizlik seti", "kapsul stand", "kahve kapsulu", "kahve cekirdegi", "ogutulmus kahve", "kokteyl makinesi")),
         "airfryer": (("airfryer", "air fryer", "sicak hava fritoz"), ("pisirme kagidi", "silikon hazne", "aksesuar")),
         "blender": (("blender",), ("yedek", "bicak", "hazne")),
@@ -288,6 +458,13 @@ def category_relevant(query, product):
         token in title for token in normalized_required
     )
 
+    accessory_only_phrases = {
+        "bluetooth kulaklik": ("kulaklik kilifi",),
+    }
+    for phrase in accessory_only_phrases.get(q, ()):
+        if phrase in title:
+            return False, f"accessory-only:{phrase}"
+
     for token in excluded:
         normalized_token = normalize_text(token).replace("ı", "i")
         if normalized_token in title and not has_positive_evidence:
@@ -301,7 +478,6 @@ def category_relevant(query, product):
         "tost makinesi",
         "kahve makinesi",
         "robot supurge",
-        "dikey supurge",
         "kettle",
         "airfryer",
         "blender",
@@ -313,13 +489,10 @@ def category_relevant(query, product):
         "klavye",
         "mouse",
         "televizyon",
-        "tablet",
         "ram bellek",
         "oyun konsolu",
         "yazici",
         "microsd hafiza karti",
-        "akilli bileklik",
-        "oyuncu kulakligi",
         "dijital kamera",
         "oyuncu koltugu",
         "ipl epilasyon cihazi",
@@ -327,8 +500,6 @@ def category_relevant(query, product):
         "hava temizleyici",
         "buharli utu",
         "akilli baskul",
-        "sarjli matkap",
-        "arac kamerasi",
         "dis macunu",
     }
     if q in positive_required_queries:
