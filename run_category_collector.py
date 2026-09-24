@@ -336,6 +336,9 @@ def run_sync_collector(module, query: str) -> int:
 
     if not products:
         print(f"EMPTY | Bu mağazada sonuç bulunamadı: {query}")
+        if getattr(module, "EMPTY_IS_FAILURE", False):
+            print("COLLECTOR ERROR | Boş sonuç bu mağaza için başarısızlık sayılıyor.")
+            return 4
         return 0
 
     save(products)
