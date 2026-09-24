@@ -276,6 +276,12 @@ def main():
     started = time.time()
     results = []
 
+    # Scope post-processing to offers refreshed by this pipeline run. This keeps
+    # filtered benchmarks from matching/evaluating stale categories already in Supabase.
+    os.environ["PIPELINE_STARTED_AT"] = __import__("datetime").datetime.now(
+        __import__("datetime").timezone.utc
+    ).isoformat()
+
     collector_jobs = []
     for category in categories:
         enabled_stores = set(category["stores"])
