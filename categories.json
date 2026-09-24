@@ -212,6 +212,67 @@
           "queries": [
             "deodorant"
           ]
+        },
+        {
+          "name": "IPL / Epilasyon Cihazı",
+          "slug": "ipl-epilasyon-cihazi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "ipl epilasyon cihazı"
+          ]
+        },
+        {
+          "name": "Saç Şekillendirici",
+          "slug": "sac-sekillendirici",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "saç şekillendirici"
+          ]
+        },
+        {
+          "name": "Akıllı Baskül",
+          "slug": "akilli-baskul",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "akıllı baskül"
+          ]
+        },
+        {
+          "name": "Diş Macunu",
+          "slug": "dis-macunu",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon"
+          ],
+          "queries": [
+            "diş macunu"
+          ]
         }
       ]
     },
@@ -484,6 +545,156 @@
             "modem",
             "router"
           ]
+        },
+        {
+          "name": "Tablet",
+          "slug": "tablet",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "tablet"
+          ]
+        },
+        {
+          "name": "RAM",
+          "slug": "ram",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "ram bellek"
+          ]
+        },
+        {
+          "name": "Oyun Konsolu",
+          "slug": "oyun-konsolu",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "oyun konsolu"
+          ]
+        },
+        {
+          "name": "Yazıcı",
+          "slug": "yazici",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "yazıcı"
+          ]
+        },
+        {
+          "name": "MicroSD / Hafıza Kartı",
+          "slug": "microsd-hafiza-karti",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "storage",
+          "queries": [
+            "microSD hafıza kartı"
+          ]
+        },
+        {
+          "name": "Akıllı Bileklik",
+          "slug": "akilli-bileklik",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "akıllı bileklik"
+          ]
+        },
+        {
+          "name": "Oyuncu Kulaklığı",
+          "slug": "oyuncu-kulakligi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "oyuncu kulaklığı"
+          ]
+        },
+        {
+          "name": "Kamera / Fotoğraf Makinesi",
+          "slug": "kamera-fotograf-makinesi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "dijital kamera"
+          ]
+        },
+        {
+          "name": "Oyuncu Koltuğu",
+          "slug": "oyuncu-koltugu",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon"
+          ],
+          "queries": [
+            "oyuncu koltuğu"
+          ]
         }
       ]
     },
@@ -594,6 +805,38 @@
           "queries": [
             "elektrikli diş fırçası"
           ]
+        },
+        {
+          "name": "Hava Temizleyici",
+          "slug": "hava-temizleyici",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "hava temizleyici"
+          ]
+        },
+        {
+          "name": "Ütü",
+          "slug": "utu",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "buharlı ütü"
+          ]
         }
       ]
     },
@@ -680,6 +923,36 @@
           "queries": [
             "otomobil aksesuarları",
             "araç içi aksesuar"
+          ]
+        },
+        {
+          "name": "Şarjlı Matkap",
+          "slug": "sarjli-matkap",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "şarjlı matkap"
+          ]
+        },
+        {
+          "name": "Araç Kamerası",
+          "slug": "arac-kamerasi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "araç kamerası"
           ]
         }
       ]
