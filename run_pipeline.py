@@ -5,6 +5,10 @@ import sys
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 ROOT = Path(__file__).resolve().parent
 CATEGORIES_FILE = ROOT / "categories.json"
 CATEGORY_RUNNER = ROOT / "run_category_collector.py"
@@ -69,6 +73,25 @@ def load_active_subcategories():
             raise RuntimeError("CATEGORY_LIMIT tam sayı olmalı.")
 
     return rows
+
+
+def configure_analysis_scope(categories):
+    filtered = bool(os.getenv("CATEGORY_SLUG", "").strip() or os.getenv("CATEGORY_LIMIT", "").strip())
+    if not filtered:
+        os.environ.pop("PIPELINE_FILTERED_RUN", None)
+        os.environ.pop("PIPELINE_ANALYSIS_TERMS", None)
+        return
+
+    terms = []
+    for row in categories:
+        for value in [row.get("query"), *(row.get("aliases") or [])]:
+            value = str(value or "").strip()
+            if value and value not in terms:
+                terms.append(value)
+
+    os.environ["PIPELINE_FILTERED_RUN"] = "1"
+    os.environ["PIPELINE_ANALYSIS_TERMS"] = json.dumps(terms, ensure_ascii=False)
+    print(f"ANALYSIS | filtered scope enabled | terms={terms}")
 
 
 def run_process(stage: str, name: str, command, *, category=None) -> dict:
@@ -215,6 +238,8 @@ def main():
     if not categories:
         print("HATA: Çalıştırılacak aktif alt kategori bulunamadı.")
         raise SystemExit(2)
+
+    configure_analysis_scope(categories)
 
     print("=" * 96)
     print("FIRSAT ENGINE - MULTI CATEGORY PIPELINE")

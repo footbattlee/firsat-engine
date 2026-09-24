@@ -68,8 +68,41 @@ def parse_dt(value):
         return None
 
 
+def normalize_text(value):
+    import re
+    import unicodedata
+    value = unicodedata.normalize("NFKD", (value or "").casefold().strip())
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    value = value.replace("ı", "i")
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", value)).strip()
+
+
+def analysis_terms():
+    if os.getenv("PIPELINE_FILTERED_RUN", "").strip() != "1":
+        return []
+    raw = os.getenv("PIPELINE_ANALYSIS_TERMS", "").strip()
+    if not raw:
+        return []
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError:
+        values = [raw]
+    return [normalize_text(x) for x in values if normalize_text(x)]
+
+
+def in_analysis_scope(title, terms):
+    if not terms:
+        return True
+    title_tokens = set(normalize_text(title).split())
+    return any(set(term.split()).issubset(title_tokens) for term in terms if term)
+
+
 def load_data():
     canonical = sb_get("canonical_products", {"select": "id,brand,title,active", "active": "eq.true"})
+    scope_terms = analysis_terms()
+    if scope_terms:
+        canonical = [c for c in canonical if in_analysis_scope(c.get("title") or "", scope_terms)]
+        print(f"DEAL SCOPE | filtered | canonical={len(canonical)} | terms={scope_terms}")
     matches = sb_get("product_matches", {"select": "canonical_product_id,product_id,status", "status": "eq.approved"})
     variants = sb_get("product_variants", {"select": "id,product_id,active", "active": "eq.true"})
     offers = sb_get(
