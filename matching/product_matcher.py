@@ -250,6 +250,30 @@ def pair_score(a, b):
     return min(score, 99.0), "heuristic"
 
 
+def analysis_terms():
+    if os.getenv("PIPELINE_FILTERED_RUN", "").strip() != "1":
+        return []
+    raw = os.getenv("PIPELINE_ANALYSIS_TERMS", "").strip()
+    if not raw:
+        return []
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError:
+        values = [raw]
+    return [normalize_text(x) for x in values if normalize_text(x)]
+
+
+def in_analysis_scope(title, terms):
+    if not terms:
+        return True
+    title_tokens = set(tokens(title))
+    for term in terms:
+        wanted = set(tokens(term))
+        if wanted and title_tokens.intersection(wanted):
+            return True
+    return False
+
+
 def load_rows():
     merchants = sb_get("merchants", {"select": "id,name,slug"})
     products = sb_get("products", {"select": "id,brand,title,slug,active"})
@@ -264,6 +288,9 @@ def load_rows():
     variant_map = {x["id"]: x for x in variants}
 
     rows = []
+    scope_terms = analysis_terms()
+    if scope_terms:
+        print(f"MATCH SCOPE | filtered | terms={scope_terms}")
     for offer in offers:
         variant = variant_map.get(offer.get("product_variant_id"))
         if not variant:
@@ -271,6 +298,8 @@ def load_rows():
         product = product_map.get(variant.get("product_id"))
         merchant = merchant_map.get(offer.get("merchant_id"))
         if not product or not merchant:
+            continue
+        if not in_analysis_scope(product.get("title") or "", scope_terms):
             continue
         rows.append({
             "offer_id": offer["id"],
