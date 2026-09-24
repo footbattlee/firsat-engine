@@ -268,11 +268,37 @@ def category_relevant(query, product):
         if normalized_token in title:
             return False, f"excluded:{token}"
 
-    # Search engines already rank by the requested category. A mandatory
-    # positive keyword in every title creates false negatives (e.g. LEGO,
-    # Hot Wheels, or 'Güç Bankası' without the literal word powerbank).
-    # Keep positive terms as documentation/diagnostics and reject only known
-    # leakage/accessory signals here. Matcher/validation remain downstream.
+    # Some store searches leak completely unrelated categories (for example a
+    # cocktail machine in a toaster search). Keep broad categories permissive
+    # to avoid false negatives, but require positive evidence for categories
+    # whose query terms are stable and descriptive.
+    positive_required_queries = {
+        "tost makinesi",
+        "kahve makinesi",
+        "robot supurge",
+        "dikey supurge",
+        "kettle",
+        "airfryer",
+        "blender",
+        "sac kurutma makinesi",
+        "tiras makinesi",
+        "elektrikli dis fircasi",
+        "monitor",
+        "ssd",
+        "klavye",
+        "mouse",
+        "televizyon",
+    }
+    if q in positive_required_queries:
+        normalized_required = [
+            normalize_text(token).replace("ı", "i") for token in required
+        ]
+        if normalized_required and not any(token in title for token in normalized_required):
+            return False, "category-term-missing"
+
+    # Ambiguous/broad categories remain exclusion-driven. This avoids the
+    # previous false negatives for LEGO/Hot Wheels and powerbanks named only
+    # as "Guc Bankasi".
     return True, None
 
 def filter_category_products(query, products):
