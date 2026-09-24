@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -275,27 +276,53 @@ def main():
     started = time.time()
     results = []
 
-    for index, category in enumerate(categories, 1):
-        print("\n" + "#" * 96)
-        print(
-            f"ALT KATEGORİ {index}/{len(categories)} | "
-            f"{category['category']} > {category['subcategory']} | "
-            f"{category['query']}"
-        )
-        print("#" * 96)
-
+    collector_jobs = []
+    for category in categories:
         enabled_stores = set(category["stores"])
         for collector_name, collector_script in COLLECTORS:
-            if collector_name not in enabled_stores:
-                continue
-            result = run_collector(collector_name, collector_script, category)
-            results.append(result)
+            if collector_name in enabled_stores:
+                collector_jobs.append((collector_name, collector_script, category))
 
-            if not result["ok"]:
-                print(
-                    f"UYARI    | {collector_name} başarısız oldu; "
-                    "pipeline sonraki collector ile devam ediyor."
-                )
+    # Collector processes are independent. Run a small, configurable pool
+    # instead of serializing hundreds of network-bound searches. Keep the
+    # default conservative to reduce 403/503 pressure on store sites.
+    try:
+        collector_workers = max(1, int(os.getenv("COLLECTOR_WORKERS", "3")))
+    except ValueError:
+        raise RuntimeError("COLLECTOR_WORKERS tam sayı olmalı.")
+
+    print(f"Collector paralellik: {collector_workers} worker")
+
+    with ThreadPoolExecutor(max_workers=collector_workers) as executor:
+        future_jobs = {
+            executor.submit(run_collector, name, script, category): (name, category)
+            for name, script, category in collector_jobs
+        }
+        try:
+            for future in as_completed(future_jobs):
+                collector_name, category = future_jobs[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    result = {
+                        "stage": "COLLECT",
+                        "name": collector_name,
+                        "ok": False,
+                        "seconds": 0.0,
+                        "code": -2,
+                        "category": category,
+                    }
+                    print(f"ERROR    | {collector_name}: {exc}")
+                results.append(result)
+                if not result["ok"]:
+                    print(
+                        f"UYARI    | {collector_name} başarısız oldu; "
+                        "pipeline diğer collector'larla devam ediyor."
+                    )
+        except KeyboardInterrupt:
+            for future in future_jobs:
+                future.cancel()
+            raise
 
     # Eşleştirme ve fırsat hesapları tüm ulaşılabilen mağaza/kategori verileri toplandıktan sonra bir kez çalışır.
     for stage, name, script in POST_STEPS:
