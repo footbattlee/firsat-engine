@@ -269,7 +269,7 @@ def in_analysis_scope(title, terms):
     title_tokens = set(tokens(title))
     for term in terms:
         wanted = set(tokens(term))
-        if wanted and title_tokens.intersection(wanted):
+        if wanted and wanted.issubset(title_tokens):
             return True
     return False
 
