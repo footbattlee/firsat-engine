@@ -41,7 +41,7 @@ def sb_get(table, params=None):
         query = dict(params or {})
         query["limit"] = page_size
         query["offset"] = offset
-        url = base_url + "?" + urlencode(query, doseq=True, safe="(),.*:-+")
+        url = base_url + "?" + urlencode(query, doseq=True, safe="(),.*:-")
         req = Request(url, headers=headers(), method="GET")
         with urlopen(req, timeout=45) as resp:
             raw = resp.read().decode()
