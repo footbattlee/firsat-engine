@@ -563,10 +563,15 @@ def load_rows():
     merchants = sb_get("merchants", {"select": "id,name,slug"})
     products = sb_get("products", {"select": "id,brand,title,slug,active"})
     variants = sb_get("product_variants", {"select": "id,product_id,gtin,sku,active"})
-    offers = sb_get("offers", {
-        "select": "id,product_variant_id,merchant_id,merchant_product_id,price,currency,in_stock,product_url",
+    offer_params = {
+        "select": "id,product_variant_id,merchant_id,merchant_product_id,price,currency,in_stock,product_url,last_checked_at",
         "in_stock": "eq.true",
-    })
+    }
+    pipeline_started_at = os.getenv("PIPELINE_STARTED_AT", "").strip()
+    if pipeline_started_at:
+        offer_params["last_checked_at"] = f"gte.{pipeline_started_at}"
+        print(f"MATCH SCOPE | only offers refreshed since {pipeline_started_at}")
+    offers = sb_get("offers", offer_params)
 
     merchant_map = {x["id"]: x for x in merchants}
     product_map = {x["id"]: x for x in products}
