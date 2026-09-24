@@ -17,6 +17,7 @@ DEFAULT_QUERY = os.getenv("N11_QUERY", "termos matara").strip() or "termos matar
 LIMIT = int(os.getenv("N11_LIMIT", "20"))
 REQUEST_TIMEOUT = 30
 REQUEST_DELAY_SECONDS = float(os.getenv("N11_REQUEST_DELAY", "0.35"))
+MAX_RETRIES = int(os.getenv("N11_MAX_RETRIES", "3"))
 REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
     "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
@@ -201,18 +202,93 @@ def parse_product_page(product_url, html):
 
 
 def fetch(session, url):
-    r = session.get(url, timeout=REQUEST_TIMEOUT)
-    r.raise_for_status()
-    return r
+    last_exc = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            r = session.get(url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
+            if r.status_code not in (403, 429) and r.status_code < 500:
+                r.raise_for_status()
+                return r
+            last_exc = requests.HTTPError(
+                f"{r.status_code} response for {r.url}", response=r
+            )
+            print(
+                f"N11 | retryable HTTP {r.status_code} | "
+                f"attempt={attempt + 1}/{MAX_RETRIES} | {r.url}"
+            )
+        except requests.RequestException as exc:
+            last_exc = exc
+            print(
+                f"N11 | request error | attempt={attempt + 1}/{MAX_RETRIES} | {exc}"
+            )
+        if attempt + 1 < MAX_RETRIES:
+            time.sleep((2 ** attempt) + 0.5)
+    raise last_exc or RuntimeError("n11 request failed")
+
+
+def fetch_search_with_browser(search_url, session):
+    """Controlled Playwright fallback for an n11 search blocked at HTTP level."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("N11 | Playwright kurulu değil; browser fallback kullanılamıyor")
+        return None
+
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(
+                headless=True,
+                args=["--disable-dev-shm-usage"],
+            )
+            context = browser.new_context(
+                locale="tr-TR",
+                user_agent=REQUEST_HEADERS["User-Agent"],
+                extra_http_headers={"Accept-Language": REQUEST_HEADERS["Accept-Language"]},
+            )
+            page = context.new_page()
+            response = page.goto(
+                search_url,
+                wait_until="domcontentloaded",
+                timeout=REQUEST_TIMEOUT * 1000,
+            )
+            page.wait_for_timeout(1800)
+            html = page.content()
+            print(
+                f"N11 | browser fallback | status={response.status if response else '?'} "
+                f"| url={page.url} | html={len(html)}"
+            )
+
+            # Reuse browser-established first-party cookies in requests so detail
+            # pages do not require launching a browser for every product.
+            for cookie in context.cookies():
+                if "n11.com" in (cookie.get("domain") or ""):
+                    session.cookies.set(
+                        cookie["name"],
+                        cookie["value"],
+                        domain=cookie.get("domain"),
+                        path=cookie.get("path") or "/",
+                    )
+            browser.close()
+            return html if extract_product_urls(html, 1) else None
+    except Exception as exc:
+        print(f"N11 | browser fallback failed | {type(exc).__name__}: {exc}")
+        return None
 
 
 def collect(query=DEFAULT_QUERY, limit=LIMIT):
     session = requests.Session(); session.headers.update(REQUEST_HEADERS)
     search_url = SEARCH_URL.format(query=quote_plus(query))
     print("Opening search:", search_url)
-    r = fetch(session, search_url)
-    print("Search HTTP:", r.status_code)
-    urls = extract_product_urls(r.text, limit)
+    try:
+        r = fetch(session, search_url)
+        print("Search HTTP:", r.status_code)
+        search_html = r.text
+    except requests.RequestException as exc:
+        print(f"N11 | requests search failed after retries | {exc}")
+        search_html = fetch_search_with_browser(search_url, session)
+        if not search_html:
+            raise
+    urls = extract_product_urls(search_html, limit)
     print("Discovered products:", len(urls))
     products = []
     for i, url in enumerate(urls, 1):
