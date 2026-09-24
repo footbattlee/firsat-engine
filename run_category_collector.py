@@ -142,6 +142,7 @@ def enable_playwright_proxy(module, settings):
 
 def normalize_text(value):
     value = unicodedata.normalize("NFKD", str(value or "").casefold())
+    value = value.replace("ı", "i")
     value = "".join(ch for ch in value if not unicodedata.combining(ch))
     return re.sub(r"[^a-z0-9]+", " ", value).strip()
 
@@ -216,6 +217,23 @@ def category_relevant(query, product):
         "kahve ogutucu": (("ogutucu", "grinder"), ()),
         "mutfak gerecleri": (("mutfak", "kitchen"), ()),
         "mutfak seti": (("mutfak", "kitchen"), ()),
+        "tablet": (("tablet", "ipad", "galaxy tab"), ("kilif", "ekran koruyucu", "kalem ucu", "stand")),
+        "ram bellek": (("ram", "ddr4", "ddr5", "sodimm", "dimm", "bellek"), ("ram sogutucu",)),
+        "oyun konsolu": (("playstation", "ps5", "xbox", "nintendo switch", "oyun konsolu"), ("kilif", "stand", "sarj istasyonu", "oyun kolu", "controller")),
+        "yazici": (("yazici", "printer", "laserjet", "deskjet", "ecotank"), ("kartus", "toner", "murekkep", "kagit")),
+        "microsd hafiza karti": (("microsd", "micro sd", "hafiza karti", "memory card"), ("kart okuyucu", "card reader", "adapter", "adaptor")),
+        "akilli bileklik": (("akilli bileklik", "smart band", "smartband", "mi band"), ("kayis", "ekran koruyucu")),
+        "oyuncu kulakligi": (("oyuncu kulakligi", "gaming headset", "gaming headphone", "headset"), ("stand", "yedek ped", "kilif")),
+        "dijital kamera": (("kamera", "camera", "mirrorless", "dslr"), ("kamera cantasi", "camera bag", "batarya", "pil", "sarj cihazi", "lens kapagi", "tripod")),
+        "oyuncu koltugu": (("oyuncu koltugu", "gaming chair"), ("koltuk kilifi", "tekerlek")),
+        "ipl epilasyon cihazi": (("ipl", "lumea", "silk expert", "epilasyon"), ("baslik", "kilif")),
+        "sac sekillendirici": (("sac sekillendirici", "airwrap", "multistyler", "styler"), ("baslik", "kilif", "cantasi")),
+        "hava temizleyici": (("hava temizleyici", "air purifier"), ("filtre", "filter")),
+        "buharli utu": (("utu", "iron", "steam iron"), ("utu masasi", "kirec", "temizleyici")),
+        "akilli baskul": (("baskul", "tarti", "smart scale"), ()),
+        "sarjli matkap": (("sarjli matkap", "akulu matkap", "drill", "vidalama"), ("matkap ucu", "bit set", "batarya", "sarj cihazi")),
+        "arac kamerasi": (("arac kamerasi", "dash cam", "dashcam", "oto kamera"), ("hafiza karti", "montaj kiti", "kablo")),
+        "dis macunu": (("dis macunu", "toothpaste"), ("dis fircasi", "gargara")),
         "cep telefonu": (("telefon", "iphone", "galaxy", "redmi", "poco", "smartphone"), ("kilif", "ekran koruyucu", "sarj aleti")),
         "bluetooth kulaklik": (("kulaklik", "earbuds", "headphone"), ("kilif", "yedek ped")),
         "kulak ustu kulaklik": (("kulaklik", "headphone", "headset"), ("kulaklik stand", "yedek ped")),
@@ -288,6 +306,23 @@ def category_relevant(query, product):
         "klavye",
         "mouse",
         "televizyon",
+        "tablet",
+        "ram bellek",
+        "oyun konsolu",
+        "yazici",
+        "microsd hafiza karti",
+        "akilli bileklik",
+        "oyuncu kulakligi",
+        "dijital kamera",
+        "oyuncu koltugu",
+        "ipl epilasyon cihazi",
+        "sac sekillendirici",
+        "hava temizleyici",
+        "buharli utu",
+        "akilli baskul",
+        "sarjli matkap",
+        "arac kamerasi",
+        "dis macunu",
     }
     if q in positive_required_queries:
         normalized_required = [
