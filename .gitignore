@@ -1,3 +1,13 @@
-creative_output/*.png
-!creative_output/.gitkeep
+__pycache__/
+*.pyc
+*.pyo
+*.log
+*.bak
+logs/
+amazon_debug_*.html
+trendyol_products.json
+FETCH_HEAD
+tests/_tmp_*.py
 .env
+creative_output/
+git

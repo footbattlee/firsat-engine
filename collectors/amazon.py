@@ -449,12 +449,10 @@ def collect(query=DEFAULT_QUERY, limit=LIMIT):
     print(f"AMAZON  | search results | {len(products)}")
 
     # Detay sayfası başlık/marka/görsel/fiyat doğrulaması sağlar.
-    enriched = []
-    for i, item in enumerate(products):
-        enriched.append(enrich_product(item, session))
-        if i + 1 < len(products):
-            time.sleep(REQUEST_DELAY_SECONDS)
-    return enriched
+    # Arama sonucunda gerekli temel veriler zaten mevcut.
+    # Her urun icin /dp/ detay sayfasina gitmek Amazon istek sayisini
+    # gereksiz yere arttirip 503/CAPTCHA riskini buyutuyordu.
+    return products
 
 
 def supabase_request(method, table, *, params=None, body=None, prefer=None):
