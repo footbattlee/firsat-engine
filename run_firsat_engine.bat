@@ -4,12 +4,12 @@ chcp 65001 >nul
 
 REM ================================================================
 REM FIRSAT ENGINE - FULL MULTI CATEGORY RUNNER
-REM 22 alt kategoriyi tarar ve run_pipeline.py akisini calistirir.
-REM Supabase anahtari bu dosyaya yazilmaz; Windows ortam degiskeninden okunur.
+REM Tum aktif alt kategorileri ve firsat sayfalarini tarar.
+REM Supabase anahtari .env veya Windows ortam degiskeninden okunur.
 REM ================================================================
 
-set "ROOT=C:\firsat-engine\firsat-engine-main"
-set "PYTHON=C:\firsat-engine\.venv\Scripts\python.exe"
+for %%I in ("%~dp0.") do set "ROOT=%%~fI"
+set "PYTHON=%ROOT%\.venv\Scripts\python.exe"
 set "LOGDIR=%ROOT%\logs"
 
 if not exist "%ROOT%" (
@@ -22,9 +22,11 @@ if not exist "%PYTHON%" (
     exit /b 2
 )
 
-if "%SUPABASE_SERVICE_ROLE_KEY%"=="" (
-    echo HATA: SUPABASE_SERVICE_ROLE_KEY ortam degiskeni tanimli degil.
-    echo Anahtari bu BAT dosyasina yazmayin. Windows kullanici ortam degiskeni olarak tanimlayin.
+cd /d "%ROOT%"
+"%PYTHON%" -c "import os; from dotenv import load_dotenv; load_dotenv('.env'); raise SystemExit(0 if os.getenv('SUPABASE_SERVICE_ROLE_KEY', '').strip() else 1)"
+if errorlevel 1 (
+    echo HATA: SUPABASE_SERVICE_ROLE_KEY eksik veya Python paketleri kurulu degil.
+    echo .env.example dosyasini .env olarak kopyalayin ve gerekli ayarlari tamamlayin.
     exit /b 2
 )
 

@@ -6,9 +6,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 ROOT = Path(__file__).resolve().parent
+load_dotenv(ROOT / ".env")
 CATEGORIES_FILE = ROOT / "categories.json"
 CATEGORY_RUNNER = ROOT / "run_category_collector.py"
+AMAZON_DEALS_COLLECTOR = ROOT / "collectors" / "amazon_deals.py"
 
 COLLECTORS = [
     ("Trendyol", ROOT / "collectors" / "trendyol.py"),
@@ -24,6 +28,7 @@ POST_STEPS = [
     # so running product_matcher.py separately here duplicated the expensive
     # full matching pass on every pipeline execution.
     ("MATCH", "Apply Matches", ROOT / "matching" / "apply_matches.py"),
+    ("REFRESH", "Refresh Competitor Offers", ROOT / "deals" / "refresh_competitor_offers.py"),
     ("DEAL", "Deal Engine", ROOT / "deals" / "deal_engine.py"),
 ]
 
@@ -49,15 +54,20 @@ def load_active_subcategories():
             if not queries:
                 continue
 
+            brand_queries = [
+                str(q).strip()
+                for q in subcategory.get("brand_queries", [])
+                if str(q).strip()
+            ]
             rows.append(
                 {
                     "category": category.get("name", ""),
                     "category_slug": category.get("slug", ""),
                     "subcategory": subcategory.get("name", ""),
                     "subcategory_slug": subcategory.get("slug", ""),
-                    # MVP: Her alt kategori tek kez taranır. İlk sorgu ana sorgudur.
-                    # categories.json içindeki diğer sorgular ileride fallback/genişletme için saklanır.
                     "query": queries[0],
+                    "filter_query": queries[0],
+                    "search_queries": list(dict.fromkeys([queries[0], *brand_queries])),
                     "aliases": queries[1:],
                     "stores": list(dict.fromkeys((subcategory.get("stores") or category.get("stores") or [name for name, _ in COLLECTORS]) + (["Amazon"] if os.getenv("AMAZON_ENABLED", "1").strip().lower() not in {"0", "false", "no"} else []))),
                     "strict_match": subcategory.get("strict_match"),
@@ -178,8 +188,25 @@ def run_collector(name: str, script: Path, category: dict) -> dict:
         str(CATEGORY_RUNNER),
         str(script.relative_to(ROOT)),
         category["query"],
+        category.get("filter_query") or category["query"],
     ]
     return run_process("COLLECT", name, command, category=category)
+
+
+def run_special_collector(name: str, script: Path) -> dict:
+    if not script.exists():
+        return {
+            "stage": "COLLECT",
+            "name": name,
+            "ok": False,
+            "seconds": 0.0,
+            "code": -1,
+            "category": None,
+        }
+    command = [sys.executable, str(script)]
+    if script == AMAZON_DEALS_COLLECTOR or script.name in {"trendyol_deals.py", "hepsiburada_deals.py"}:
+        command.append("--find-competitors")
+    return run_process("COLLECT", name, command)
 
 
 def run_post_step(stage: str, name: str, script: Path) -> dict:
@@ -214,10 +241,13 @@ def print_summary(results, total_seconds, category_count, stopped=False):
         print("\nBaşarısız collector adımları:")
         for r in failed:
             c = r.get("category") or {}
-            print(
-                f"FAIL | {c.get('category')} > {c.get('subcategory')} | "
-                f"{r['name']} | code={r['code']}"
-            )
+            if c:
+                print(
+                    f"FAIL | {c.get('category')} > {c.get('subcategory')} | "
+                    f"{r['name']} | code={r['code']}"
+                )
+            else:
+                print(f"FAIL | {r['name']} | code={r['code']}")
 
     if post_results:
         print("\nAnaliz adımları:")
@@ -256,7 +286,12 @@ def main():
         print(f"HATA: categories.json okunamadı: {exc}")
         raise SystemExit(2)
 
-    if not categories:
+    amazon_deals_enabled = os.getenv("AMAZON_DEALS_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+    marketplace_deals = [(name, ROOT / "collectors" / f"{slug}_deals.py")
+                         for slug, name in [("trendyol", "Trendyol Fırsat Sayfaları"),
+                                            ("hepsiburada", "Hepsiburada Fırsat Sayfaları")]
+                         if os.getenv(f"{slug.upper()}_DEALS_ENABLED", "1").lower() not in {"0", "false", "no"}]
+    if not categories and not amazon_deals_enabled and not marketplace_deals:
         print("HATA: Çalıştırılacak aktif alt kategori bulunamadı.")
         raise SystemExit(2)
 
@@ -266,10 +301,13 @@ def main():
     print(f"Aktif alt kategori: {len(categories)}")
     selected_stores = sorted({store for category in categories for store in category["stores"]})
     print(f"Mağaza: {len(selected_stores)} | {', '.join(selected_stores)}")
-    total_collector_runs = sum(len(category["stores"]) for category in categories)
+    total_collector_runs = sum(len(category["stores"]) * len(category.get("search_queries", [category["query"]])) for category in categories)
+    if amazon_deals_enabled:
+        total_collector_runs += 1
+    total_collector_runs += len(marketplace_deals)
     print(f"Toplam collector çalışması: {total_collector_runs}")
-    print("Akış: Tüm kategoriler/mağazalar -> Product Matcher -> Apply Matches -> Deal Engine")
-    print("Her alt kategori için categories.json içindeki ilk sorgu ana sorgu olarak kullanılır.")
+    print("Akış: Amazon / Trendyol / Hepsiburada fırsatları -> Ürüne özel rakip araması -> Kategori taramaları -> Apply Matches -> Competitor Refresh -> Deal Engine")
+    print("Her alt kategori ana sorguyla; tanımlıysa kontrollü marka sorgularıyla da taranır.")
     print("Collector hataları loglanır; diğer mağaza/kategoriler çalışmaya devam eder.")
     print("Sadece Matcher / Apply Matches / Deal Engine gibi kritik analiz adımları hata verirse pipeline durur.")
 
@@ -285,9 +323,25 @@ def main():
     collector_jobs = []
     for category in categories:
         enabled_stores = set(category["stores"])
-        for collector_name, collector_script in COLLECTORS:
-            if collector_name in enabled_stores:
-                collector_jobs.append((collector_name, collector_script, category))
+        for search_query in category.get("search_queries", [category["query"]]):
+            search = {**category, "query": search_query}
+            for collector_name, collector_script in COLLECTORS:
+                if collector_name in enabled_stores:
+                    collector_jobs.append((collector_name, collector_script, search))
+
+    # Discover competitors for Amazon deals before the ordinary category scans.
+    # Discovery is independent of categories.json and finishes before matching.
+    if amazon_deals_enabled:
+        amazon_result = run_special_collector("Amazon Fırsat Sayfaları", AMAZON_DEALS_COLLECTOR)
+        results.append(amazon_result)
+        if not amazon_result["ok"]:
+            print("UYARI | Amazon fırsat/rakip araması tamamlanamadı; sonuçlar kısmi olabilir.")
+
+    for name, script in marketplace_deals:
+        result = run_special_collector(name, script)
+        results.append(result)
+        if not result["ok"]:
+            print(f"UYARI | {name}: fırsat/rakip araması kısmi veya başarısız.")
 
     # Collector processes are independent. Run a small, configurable pool
     # instead of serializing hundreds of network-bound searches. Keep the
@@ -332,7 +386,8 @@ def main():
 
     # Eşleştirme ve fırsat hesapları tüm ulaşılabilen mağaza/kategori verileri toplandıktan sonra bir kez çalışır.
     for stage, name, script in POST_STEPS:
-        result = run_post_step(stage, name, script)
+        result = (run_process(stage, name, [sys.executable, str(script), "--apply"])
+                  if stage == "REFRESH" else run_post_step(stage, name, script))
         results.append(result)
 
         if not result["ok"]:
@@ -340,11 +395,11 @@ def main():
             print_summary(results, total, len(categories), stopped=True)
             raise SystemExit(2)
 
-    # Deal Engine başarılı olduktan sonra yeni candidate fırsatları admin
-    # Telegram grubuna otomatik ve idempotent olarak gönder.
+    # DB trigger enqueues candidates for the independent cloud schedule.
+    # Admin messages retain manual Reels selection and rejection controls.
     approval_result = run_process(
         "APPROVAL",
-        "Telegram Admin Dispatch",
+        "Telegram Reels Selection Dispatch",
         [sys.executable, str(APPROVAL_SCRIPT), "--dispatch-pending", "--limit", "100"],
     )
     results.append(approval_result)

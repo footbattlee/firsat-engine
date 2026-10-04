@@ -3,7 +3,7 @@ import html
 import json
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from pathlib import Path
 
@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 
+from creative.generate_deal_reel import render_reel
 from creative.generate_deal_creative import (
     load_candidates,
     money,
@@ -23,6 +24,7 @@ from creative.generate_deal_creative import (
 
 from publishers.instagram_publisher import publish_instagram_post
 from publishers.facebook_publisher import publish_facebook_photo
+from tracking_links import tracked_deal_url
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 APPROVAL_CHAT_ID = os.getenv("TELEGRAM_APPROVAL_CHAT_ID", "").strip()
@@ -30,7 +32,7 @@ PUBLISH_CHAT_ID = os.getenv("TELEGRAM_PUBLISH_CHAT_ID", "").strip()
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-PLATFORMS = ("telegram", "instagram", "facebook")
+PLATFORMS = ("telegram", "instagram", "facebook", "story")
 MEDIA_BUCKET = os.getenv("INSTAGRAM_MEDIA_BUCKET", "instagram-media").strip() or "instagram-media"
 
 
@@ -67,7 +69,7 @@ def sb_headers(extra=None):
 
 
 def sb_get(table, params):
-    url = f"{SUPABASE_URL}/rest/v1/{table}?" + urlencode(params, safe="(),.*:-+")
+    url = f"{SUPABASE_URL}/rest/v1/{table}?" + urlencode(params, safe="(),.*:-")
     response = requests.get(url, headers=sb_headers(), timeout=30)
     response.raise_for_status()
     return response.json()
@@ -97,15 +99,42 @@ def load_candidate_for_publish(candidate_id):
     return candidates[0]
 
 
+def require_safe_candidate(data):
+    validation = validate_candidate(data)
+    if not validation["ok"]:
+        raise RuntimeError(
+            "Validation gate candidate'i engelledi: " + ", ".join(validation["errors"])
+        )
+
+
+def is_redispatch(data):
+    return data.get("notification_reason") == "redispatch_price_drop"
+
+
+def discount_text(data):
+    if is_redispatch(data):
+        drop = f"{float(data.get('redispatch_drop_percent') or 0):.2f}".replace(".", ",")
+        return f"Son paylaşımdan sonra %{drop} düştü"
+    gap = f"{float(data['gap_percent']):.2f}".replace(".", ",")
+    return f"Rakip mağazadan %{gap} daha ucuz"
+
+
+def comparison_price(data):
+    if is_redispatch(data):
+        return "Önceki paylaşım fiyatı", data.get("previous_notified_price")
+    return "Rakip fiyat", data["competitor_price"]
+
+
 def public_caption(data):
+    old_label, old_value = comparison_price(data)
     return (
         "🔥 <b>FİYATZADE FIRSATI</b>\n\n"
         f"<b>{html.escape(str(data['title']))}</b>\n\n"
         f"🛒 {html.escape(str(data['merchant']))}\n"
-        f"💸 <s>{html.escape(money(data['competitor_price']))}</s>\n"
+        f"💸 {old_label}: <s>{html.escape(money(old_value))}</s>\n"
         f"🔥 <b>{html.escape(money(data['cheapest_price']))}</b>\n"
-        f"📉 <b>%{float(data['gap_percent']):.2f}".replace(".", ",") + " daha ucuz</b>\n\n"
-        f"🔗 <a href=\"{html.escape(str(data['product_url']), quote=True)}\">Fırsata Git</a>\n\n"
+        f"📉 <b>{html.escape(discount_text(data))}</b>\n\n"
+        f"🔗 <a href=\"{html.escape(tracked_deal_url(data, 'telegram'), quote=True)}\">Fırsata Git</a>\n\n"
         "<i>Fiyatlar değişebilir. Satın almadan önce mağaza fiyatını kontrol edin.</i>\n"
         "#işbirliği #reklam"
     )
@@ -132,17 +161,34 @@ def publish_to_telegram(data):
 
 
 def instagram_caption(data):
-    gap = f"{float(data['gap_percent']):.2f}".replace(".", ",")
+    old_label, old_value = comparison_price(data)
     return (
         f"🔥 FİYATZADE FIRSATI\n\n"
         f"{data['title']}\n\n"
         f"🛒 {data['merchant']}\n"
-        f"💸 Rakip fiyat: {money(data['competitor_price'])}\n"
+        f"💸 {old_label}: {money(old_value)}\n"
         f"🔥 Fırsat fiyatı: {money(data['cheapest_price'])}\n"
-        f"📉 %{gap} daha ucuz\n\n"
+        f"📉 {discount_text(data)}\n\n"
+        f"🔗 Fırsata git: {tracked_deal_url(data, 'instagram')}\n\n"
         "Fiyatlar değişebilir. Satın almadan önce mağaza fiyatını kontrol edin.\n\n"
         "#işbirliği #reklam #fiyatzade #indirim #fırsat"
     )
+
+
+def publish_story_assist(data):
+    outputs = render_candidate_bundle(data)
+    upload_story_assist(data["id"], outputs["story"])
+    with open(outputs["story"], "rb") as image:
+        result = api(
+            "sendPhoto",
+            data={
+                "chat_id": APPROVAL_CHAT_ID,
+                "caption": (f"📱 STORY HAZIR\n\n{data['title']}\n\n"
+                            f"🔗 Ürüne git: {tracked_deal_url(data, 'story')}"),
+            },
+            files={"photo": image},
+        )
+    return str(result["message_id"])
 
 
 def publish_to_instagram(data):
@@ -151,16 +197,16 @@ def publish_to_instagram(data):
     return publish_instagram_post(instagram_caption(data), image, data["id"])
 
 
-def facebook_caption(data):
-    gap = f"{float(data['gap_percent']):.2f}".replace(".", ",")
-    link = data.get("affiliate_url") or data["product_url"]
+def facebook_caption(data, channel="facebook"):
+    old_label, old_value = comparison_price(data)
+    link = tracked_deal_url(data, channel)
     return (
         f"🔥 FİYATZADE FIRSATI\n\n"
         f"{data['title']}\n\n"
         f"🛒 {data['merchant']}\n"
-        f"💸 Rakip fiyat: {money(data['competitor_price'])}\n"
+        f"💸 {old_label}: {money(old_value)}\n"
         f"🔥 Fırsat fiyatı: {money(data['cheapest_price'])}\n"
-        f"📉 %{gap} daha ucuz\n\n"
+        f"📉 {discount_text(data)}\n\n"
         f"🔗 Fırsata git: {link}\n\n"
         "Fiyatlar değişebilir. Satın almadan önce mağaza fiyatını kontrol edin.\n\n"
         "#işbirliği #reklam #fiyatzade #indirim #fırsat"
@@ -247,14 +293,19 @@ def caption(data, validation):
         warning = "\n\n⚠️ <b>KONTROL GEREKLİ</b>\n" + "\n".join(
             html.escape(item) for item in validation["warnings"]
         )
+    old_label, old_value = comparison_price(data)
+    detail = ""
+    if is_redispatch(data):
+        gap = f"{float(data['gap_percent']):.2f}".replace(".", ",")
+        detail = f"\n🏪 Rakip mağaza farkı: %{gap}"
     return (
         "🟠 <b>YENİ FIRSAT</b>\n\n"
         f"<b>{html.escape(str(data['title']))}</b>\n\n"
         f"🏷 Marka: {html.escape(str(data.get('brand') or '-'))}\n"
         f"🛒 Mağaza: {html.escape(str(data['merchant']))}\n"
-        f"💸 Rakip fiyat: <s>{html.escape(money(data['competitor_price']))}</s>\n"
+        f"💸 {old_label}: <s>{html.escape(money(old_value))}</s>\n"
         f"🔥 Fırsat fiyatı: <b>{html.escape(money(data['cheapest_price']))}</b>\n"
-        f"📉 <b>%{float(data['gap_percent']):.2f}".replace(".", ",") + " daha ucuz</b>"
+        f"📉 <b>{html.escape(discount_text(data))}</b>{detail}"
         f"{warning}\n\n"
         f"🔗 <a href=\"{html.escape(str(data['product_url']), quote=True)}\">Ürüne Git</a>"
     )
@@ -262,11 +313,16 @@ def caption(data, validation):
 
 def keyboard(candidate_id):
     return {
-        "inline_keyboard": [[
-            {"text": "🚀 PAYLAŞ", "callback_data": f"publish:{candidate_id}"},
-            {"text": "❌ REDDET", "callback_data": f"reject:{candidate_id}"},
-            {"text": "🟢 WHATSAPP", "callback_data": f"whatsapp:{candidate_id}"},
-        ]]
+        "inline_keyboard": [
+            [
+
+                {"text": "🎬 REELS PAYLAŞ", "callback_data": f"reel:{candidate_id}"},
+            ],
+            [
+                {"text": "❌ REDDET", "callback_data": f"reject:{candidate_id}"},
+                {"text": "🟢 WHATSAPP", "callback_data": f"whatsapp:{candidate_id}"},
+            ],
+        ]
     }
 
 
@@ -287,6 +343,37 @@ def upload_story_assist(candidate_id, story_path):
     return object_path
 
 
+def upload_reel_assist(candidate_id, reel_path):
+    """Upload the prepared MP4 so the cloud PAYLAS webhook can publish it."""
+    object_path = f"deals/{candidate_id}/reel.mp4"
+    url = f"{SUPABASE_URL}/storage/v1/object/{MEDIA_BUCKET}/{object_path}"
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "video/mp4",
+        "x-upsert": "true",
+    }
+    with open(reel_path, "rb") as handle:
+        response = requests.post(url, headers=headers, data=handle, timeout=180)
+    response.raise_for_status()
+    current = publication_state(candidate_id, "reel")
+    if not current or current.get("status") != "published":
+        sb_upsert(
+            "deal_publications",
+            [{
+                "deal_candidate_id": candidate_id,
+                "platform": "reel",
+                "status": "pending",
+                "external_post_id": None,
+                "error_message": None,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }],
+            "deal_candidate_id,platform",
+        )
+    print(f"REEL READY | {candidate_id} | {reel_path}")
+    return object_path
+
+
 def send_candidate(data):
     validation = validate_candidate(data)
     if not validation["ok"]:
@@ -301,6 +388,11 @@ def send_candidate(data):
         upload_story_assist(data["id"], outputs["story"])
     except Exception as exc:
         print(f"STORY PREP WARNING | {data['id']} | {exc}")
+    try:
+        reel_path = render_reel(data, outputs["story"])
+        upload_reel_assist(data["id"], reel_path)
+    except Exception as exc:
+        print(f"REEL PREP WARNING | {data['id']} | {exc}")
     with open(preview, "rb") as image:
         result = api(
             "sendPhoto",
@@ -318,22 +410,45 @@ def send_candidate(data):
 
 
 def dispatch_pending_candidates(limit=50):
-    """Send candidate deals to admin once; retries only failed/pending dispatches."""
-    candidates = load_candidates(limit)
+    """Send pending deals; deal engine can reopen one after a meaningful new price drop."""
+    # Read lightweight candidate IDs first. Loading full product/offer details
+    # for already-dispatched rows made each pipeline spend minutes on work it
+    # would immediately skip. The limit now means new cards to send.
+    pipeline_started_at = os.getenv("PIPELINE_STARTED_AT", "").strip()
+    if not pipeline_started_at:
+        pipeline_started_at = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        print(f"APPROVAL SCOPE | son 1 saatte güncellenen adaylar: {pipeline_started_at}")
+    else:
+        print(f"APPROVAL SCOPE | mevcut pipeline adayları: {pipeline_started_at}")
+    candidate_refs = sb_get(
+        "deal_candidates",
+        {
+            "select": "id",
+            "status": "eq.candidate",
+            "updated_at": f"gte.{pipeline_started_at}",
+            "order": "gap_percent.desc",
+            "limit": "1000",
+        },
+    )
+    dispatch_rows = sb_get(
+        "deal_approval_dispatches",
+        {"select": "deal_candidate_id,status", "limit": "10000"},
+    )
+    dispatch_by_candidate = {row["deal_candidate_id"]: row for row in dispatch_rows}
     sent = 0
     skipped = 0
     failed = 0
-    for data in candidates:
-        candidate_id = data["id"]
-        rows = sb_get(
-            "deal_approval_dispatches",
-            {"select": "status", "deal_candidate_id": f"eq.{candidate_id}", "limit": "1"},
-        )
-        if rows and rows[0].get("status") == "sent":
+    for ref in candidate_refs:
+        if sent + failed >= limit:
+            break
+        candidate_id = ref["id"]
+        dispatch = dispatch_by_candidate.get(candidate_id)
+        if dispatch and dispatch.get("status") == "sent":
             skipped += 1
             continue
+        data = load_candidates(1, candidate_id)[0]
         now = datetime.now(timezone.utc).isoformat()
-        if not rows:
+        if not dispatch:
             sb_upsert(
                 "deal_approval_dispatches",
                 [{"deal_candidate_id": candidate_id, "status": "pending", "updated_at": now}],
@@ -342,6 +457,11 @@ def dispatch_pending_candidates(limit=50):
         try:
             message_id = send_candidate(data)
             if not message_id:
+                sb_patch(
+                    "deal_candidates", {"id": f"eq.{candidate_id}"},
+                    {"status": "expired", "verified": False,
+                     "verified_at": None, "updated_at": now},
+                )
                 raise RuntimeError("Validation gate candidate'i engelledi")
             sb_patch(
                 "deal_approval_dispatches",
@@ -383,77 +503,20 @@ def handle_callback(query):
     if action == "publish":
         # Telegram callback queries expire quickly. Acknowledge the button press
         # before the slower Telegram/Meta publishing work starts.
-        answer_callback(callback_id, "PAYLAŞ işlemi başlatıldı.")
-        try:
-            persist_publish_request(candidate_id)
-            data = load_candidate_for_publish(candidate_id)
-            results = []
-
-            telegram_state = publication_state(candidate_id, "telegram")
-            if telegram_state and telegram_state.get("status") == "published":
-                message_id = telegram_state.get("external_post_id") or "-"
-                results.append("Telegram zaten yayınlandı")
-                print(f"APPROVAL PUBLISH SKIP | {candidate_id} | telegram=already_published | message_id={message_id}")
-            else:
-                try:
-                    mark_publication(candidate_id, "telegram", "publishing")
-                    message_id = publish_to_telegram(data)
-                    mark_publication(candidate_id, "telegram", "published", external_post_id=message_id)
-                    results.append("Telegram yayınlandı")
-                    print(f"APPROVAL PUBLISH | {candidate_id} | telegram=published | message_id={message_id}")
-                except Exception as publish_exc:
-                    mark_publication(candidate_id, "telegram", "failed", error_message=str(publish_exc)[:1000])
-                    results.append("Telegram başarısız")
-                    print(f"TELEGRAM PUBLISH ERROR | {candidate_id} | {publish_exc}")
-
-            instagram_state = publication_state(candidate_id, "instagram")
-            if instagram_state and instagram_state.get("status") == "published":
-                media_id = instagram_state.get("external_post_id") or "-"
-                results.append("Instagram zaten yayınlandı")
-                print(f"APPROVAL PUBLISH SKIP | {candidate_id} | instagram=already_published | media_id={media_id}")
-            else:
-                try:
-                    mark_publication(candidate_id, "instagram", "publishing")
-                    media_id = publish_to_instagram(data)
-                    mark_publication(candidate_id, "instagram", "published", external_post_id=media_id)
-                    results.append("Instagram yayınlandı")
-                    print(f"APPROVAL PUBLISH | {candidate_id} | instagram=published | media_id={media_id}")
-                except Exception as publish_exc:
-                    mark_publication(candidate_id, "instagram", "failed", error_message=str(publish_exc)[:1000])
-                    results.append("Instagram başarısız")
-                    print(f"INSTAGRAM PUBLISH ERROR | {candidate_id} | {publish_exc}")
-
-            facebook_state = publication_state(candidate_id, "facebook")
-            if facebook_state and facebook_state.get("status") == "published":
-                post_id = facebook_state.get("external_post_id") or "-"
-                results.append("Facebook zaten yayınlandı")
-                print(f"APPROVAL PUBLISH SKIP | {candidate_id} | facebook=already_published | post_id={post_id}")
-            else:
-                try:
-                    mark_publication(candidate_id, "facebook", "publishing")
-                    post_id = publish_to_facebook(data)
-                    mark_publication(candidate_id, "facebook", "published", external_post_id=post_id)
-                    results.append("Facebook yayınlandı")
-                    print(f"APPROVAL PUBLISH | {candidate_id} | facebook=published | post_id={post_id}")
-                except Exception as publish_exc:
-                    mark_publication(candidate_id, "facebook", "failed", error_message=str(publish_exc)[:1000])
-                    results.append("Facebook başarısız")
-                    print(f"FACEBOOK PUBLISH ERROR | {candidate_id} | {publish_exc}")
-
-            print(f"APPROVAL PUBLISH DONE | {candidate_id} | " + " | ".join(results))
-        except Exception as exc:
-            print(f"APPROVAL PUBLISH ERROR | {candidate_id} | {exc}")
+        answer_callback(callback_id, "Normal gönderi otomatik kuyrukta; yarım saatlik yayın sırasını bekliyor.")
+        return
     elif action == "whatsapp":
         answer_callback(callback_id, "WhatsApp paylaşım paketi hazırlanıyor.")
         try:
             data = load_candidate_for_publish(candidate_id)
+            require_safe_candidate(data)
             outputs = render_candidate_bundle(data)
             with open(outputs["instagram"], "rb") as image:
                 api(
                     "sendPhoto",
                     data={
                         "chat_id": APPROVAL_CHAT_ID,
-                        "caption": facebook_caption(data),
+                        "caption": facebook_caption(data, "whatsapp"),
                     },
                     files={"photo": image},
                 )

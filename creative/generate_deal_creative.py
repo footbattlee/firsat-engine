@@ -55,7 +55,7 @@ def _one(table, params, label):
 
 def load_candidates(limit=1, candidate_id=None):
     params = {
-        "select": "id,canonical_product_id,cheapest_offer_id,cheapest_merchant_id,cheapest_price,competitor_price,gap_percent,verified,history_status",
+        "select": "id,canonical_product_id,cheapest_offer_id,cheapest_merchant_id,cheapest_price,competitor_price,gap_percent,verified,history_status,history_drop_percent,notification_reason,redispatch_drop_percent,previous_notified_price",
         "order": "gap_percent.desc", "limit": str(limit),
     }
     if candidate_id:
@@ -75,7 +75,7 @@ def load_candidates(limit=1, candidate_id=None):
             "select": "id,brand,title", "id": f"eq.{dc['canonical_product_id']}", "limit": "1"
         }, "canonical_product")
         offer = _one("offers", {
-            "select": "id,image_url,product_url", "id": f"eq.{dc['cheapest_offer_id']}", "limit": "1"
+            "select": "id,image_url,product_url,affiliate_url", "id": f"eq.{dc['cheapest_offer_id']}", "limit": "1"
         }, "cheapest_offer")
         merchant = _one("merchants", {
             "select": "id,name", "id": f"eq.{dc['cheapest_merchant_id']}", "limit": "1"
@@ -92,6 +92,7 @@ def load_candidates(limit=1, candidate_id=None):
             "offer_id": offer["id"],
             "image_url": offer.get("image_url"),
             "product_url": offer.get("product_url"),
+            "affiliate_url": offer.get("affiliate_url"),
             "merchant": merchant["name"],
         }
         required = ("title", "image_url", "merchant", "cheapest_price", "competitor_price", "gap_percent")
@@ -135,6 +136,26 @@ def validate_candidate(data, gap_tolerance=0.35):
                 errors.append(
                     f"PRICE_GAP_MISMATCH: stored={stored_gap:.2f} calculated={calculated_gap:.2f}"
                 )
+            max_gap = float(os.getenv("MAX_AUTO_DEAL_GAP_PERCENT", "70"))
+            if stored_gap + 1e-9 >= max_gap:
+                errors.append(f"SUSPICIOUS_PRICE_GAP: gap={stored_gap:.2f}")
+            history_drop = float(data.get("history_drop_percent") or 0)
+            max_history_drop = float(os.getenv("MAX_AUTO_HISTORY_DROP_PERCENT", "60"))
+            if history_drop + 1e-9 >= max_history_drop:
+                errors.append(f"SUSPICIOUS_HISTORY_DROP: drop={history_drop:.2f}")
+
+            reason = str(data.get("notification_reason") or "")
+            threshold = float(os.getenv("DEAL_THRESHOLD_PERCENT", "15"))
+            redispatch_threshold = float(os.getenv("REDISPATCH_PRICE_DROP_PERCENT", "5"))
+            if reason == "redispatch_price_drop":
+                redispatch_drop = float(data.get("redispatch_drop_percent") or 0)
+                previous_price = float(data.get("previous_notified_price") or 0)
+                if redispatch_drop + 1e-9 < redispatch_threshold:
+                    errors.append(f"REDISPATCH_DROP_BELOW_THRESHOLD: drop={redispatch_drop:.2f}")
+                if previous_price <= cheapest:
+                    errors.append("REDISPATCH_PREVIOUS_PRICE_INVALID")
+            elif stored_gap + 1e-9 < threshold:
+                errors.append(f"DEAL_GAP_BELOW_THRESHOLD: gap={stored_gap:.2f}")
     except (TypeError, ValueError):
         errors.append("PRICE_DATA_INVALID")
 
@@ -282,18 +303,32 @@ def old_price(draw, x, y, value, size):
     draw.line((b[0]-3,cy,b[2]+3,cy-4),fill=ORANGE,width=max(4,size//9))
 
 
-def discount_badge(draw, box, gap, big, small):
+def is_redispatch(data):
+    return data.get("notification_reason") == "redispatch_price_drop"
+
+
+def display_discount(data):
+    if is_redispatch(data):
+        return float(data.get("redispatch_drop_percent") or 0), "SON PAYLAŞIMA GÖRE"
+    return float(data["gap_percent"]), "DAHA UCUZ"
+
+
+def discount_badge(draw, box, gap, big, small, label="DAHA UCUZ"):
     draw.rounded_rectangle(box, 28, fill=ORANGE)
     x1,y1,_,_=box
     draw.text((x1+28,y1+20),f"%{float(gap):.2f}".replace(".",","),font=font(big,True),fill=WHITE)
-    draw.text((x1+30,y1+22+big), "DAHA UCUZ",font=font(small,True),fill=WHITE)
+    label_size = min(small, 16) if len(label) > 12 else small
+    draw.text((x1+30,y1+22+big),label,font=font(label_size,True),fill=WHITE)
 
 
 def price_card(draw, box, data, scale=1.0):
     x1,y1,x2,y2=box
     draw.rounded_rectangle(box,28,fill=WHITE,outline=LINE,width=2)
-    draw.text((x1+30,y1+28),"RAKİP FİYAT",font=font(int(18*scale),True),fill=MUTED)
-    old_price(draw,x1+30,y1+55,data["competitor_price"],int(30*scale))
+    previous = is_redispatch(data)
+    old_label = "ÖNCEKİ PAYLAŞIM" if previous else "RAKİP FİYAT"
+    old_value = data.get("previous_notified_price") if previous else data["competitor_price"]
+    draw.text((x1+30,y1+28),old_label,font=font(int(18*scale),True),fill=MUTED)
+    old_price(draw,x1+30,y1+55,old_value,int(30*scale))
     draw.text((x1+30,y1+112),"FIRSAT FİYATI",font=font(int(18*scale),True),fill=MUTED)
     price_text = money(data["cheapest_price"])
     price_size = int(45*scale)
@@ -325,7 +360,8 @@ def render_instagram(data, product):
 
     # V2.2: product is the hero; pricing is a large supporting block.
     product_panel(canvas,draw,product,(355,335,1025,1015))
-    discount_badge(draw,(715,285,1020,430),data["gap_percent"],50,21)
+    discount, label = display_discount(data)
+    discount_badge(draw,(715,285,1020,430),discount,50,21,label)
 
     price_card(draw,(55,485,340,800),data,1.18)
     merchant_badge(draw,(55,820,340,915),data["merchant"])
@@ -346,7 +382,8 @@ def render_story(data, product):
         draw.text((60,225+i*56),line,font=tf,fill=NAVY_DARK)
 
     product_panel(canvas,draw,product,(100,405,980,1195))
-    discount_badge(draw,(655,360,985,515),data["gap_percent"],52,23)
+    discount, label = display_discount(data)
+    discount_badge(draw,(655,360,985,515),discount,52,23,label)
 
     # Balanced lower row: equal visual weight for price and merchant/CTA.
     price_card(draw,(70,1240,570,1515),data,1.08)
@@ -370,7 +407,8 @@ def render_site(data, product):
     # Site follows the same hierarchy as Story but in three responsive columns.
     price_card(draw,(45,285,385,525),data,.92)
     product_panel(canvas,draw,product,(410,125,835,585))
-    discount_badge(draw,(790,105,1148,240),data["gap_percent"],43,19)
+    discount, label = display_discount(data)
+    discount_badge(draw,(790,105,1148,240),discount,43,19,label)
 
     merchant_badge(draw,(865,275,1150,360),data["merchant"])
     draw.rounded_rectangle((865,385,1150,465),36,fill=ORANGE)

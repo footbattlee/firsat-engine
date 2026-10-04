@@ -30,10 +30,8 @@ CARD_SELECTORS = [
     ".product-card",
 ]
 
-PRICE_PATTERN = re.compile(
-    r"(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(?:TL|₺)",
-    flags=re.I,
-)
+PRICE_PATTERN = re.compile(r"(\d[\d.,]*)\s*(?:TL|₺)", flags=re.I)
+MAX_PRICE_DROP_PERCENT = float(os.getenv("MAX_TRENDYOL_PRICE_DROP_PERCENT", "60"))
 
 PROMO_WORDS = (
     "indirim",
@@ -43,16 +41,43 @@ PROMO_WORDS = (
     "kazanç",
     "kazanc",
     "trendyol plus",
+    "kargo",
+    "teslimat",
+    "taksit",
 )
 
 
 def to_float(raw: str | None):
+    """Parse both Turkish (1.234,56) and current Trendyol (1,234.56) prices."""
     if not raw:
         return None
+    value = re.sub(r"[^0-9.,]", "", str(raw))
+    if not value:
+        return None
+
+    comma = value.rfind(",")
+    dot = value.rfind(".")
+    decimal_sep = None
+    if comma >= 0 and dot >= 0:
+        decimal_sep = "," if comma > dot else "."
+    elif comma >= 0:
+        tail = value[comma + 1:]
+        decimal_sep = "," if len(tail) in (1, 2) else None
+    elif dot >= 0:
+        tail = value[dot + 1:]
+        decimal_sep = "." if len(tail) in (1, 2) else None
+
+    if decimal_sep:
+        thousands_sep = "." if decimal_sep == "," else ","
+        normalized = value.replace(thousands_sep, "").replace(decimal_sep, ".")
+    else:
+        normalized = value.replace(",", "").replace(".", "")
+
     try:
-        return float(raw.replace(".", "").replace(",", "."))
+        amount = float(normalized)
     except ValueError:
         return None
+    return amount if amount > 0 else None
 
 
 def parse_first_price(text: str | None):
@@ -129,66 +154,26 @@ async def get_product_href(card):
 
 
 async def extract_current_price(card):
-    """Karttaki güncel satış fiyatını doğrudan fiyat DOM elemanlarından seçer."""
-    try:
-        candidates = await card.evaluate(
-            r"""
-            card => {
-              const nodes = [...card.querySelectorAll(
-                "[data-testid*='price'], [class*='price'], [class*='Price'], " +
-                "[class*='prc-'], [class*='selling'], [class*='discounted']"
-              )];
-
-              const promoWords = ['indirim','kupon','puan','cashback','kazanç','kazanc','trendyol plus'];
-              const goodWords = ['current','selling','discounted','sale','prc-box-dscntd','prc-box-sllng'];
-              const badWords = ['old','original','list','strike','crossed','campaign','coupon','benefit'];
-              const moneyRe = /(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(?:TL|₺)/i;
-
-              const result = [];
-              for (let i = 0; i < nodes.length; i++) {
-                const el = nodes[i];
-                const style = window.getComputedStyle(el);
-                if (style.display === 'none' || style.visibility === 'hidden') continue;
-
-                const text = (el.innerText || el.textContent || '').trim();
-                if (!moneyRe.test(text)) continue;
-
-                const cls = String(el.className || '').toLowerCase();
-                const testid = String(el.getAttribute('data-testid') || '').toLowerCase();
-                const meta = cls + ' ' + testid;
-                const own = text.toLowerCase();
-                const parent = (el.parentElement?.innerText || '').toLowerCase();
-
-                let score = 0;
-                if (goodWords.some(w => meta.includes(w))) score += 100;
-                if (meta.includes('price')) score += 35;
-                if (badWords.some(w => meta.includes(w))) score -= 140;
-                if (promoWords.some(w => own.includes(w))) score -= 180;
-                if (promoWords.some(w => parent.includes(w)) && !goodWords.some(w => meta.includes(w))) score -= 80;
-                if (el.children.length === 0) score += 20;
-                if ((text.match(/TL|₺/gi) || []).length === 1) score += 15;
-
-                result.push({ text, score, order: i });
-              }
-
-              result.sort((a, b) => (b.score - a.score) || (a.order - b.order));
-              return result.slice(0, 20);
-            }
-            """
-        )
-    except Exception:
-        candidates = []
-
-    for candidate in candidates:
-        value = parse_first_price(candidate.get("text"))
-        if value is not None and candidate.get("score", 0) >= 0:
+    """Read only Trendyol's current-price leaf nodes; ignore coupons and old prices."""
+    selectors = (
+        "[data-testid='sale-price']",
+        "[data-testid='price-value']",
+        "[data-testid='price-section']",
+        ".prc-box-dscntd",
+        ".prc-box-sllng",
+    )
+    for selector in selectors:
+        text = await text_first(card, [selector])
+        value = parse_first_price(text)
+        if value is not None:
             return value
 
+    # Older card layouts may not have the test IDs above. The text fallback
+    # skips coupon, shipping, installment and Plus-member price lines.
     try:
         card_text = (await card.inner_text()).strip()
     except Exception:
         card_text = ""
-
     return fallback_price_from_text(card_text)
 
 
@@ -279,7 +264,7 @@ def find_offer(merchant_id: str, merchant_product_id: str):
         params={
             "merchant_id": f"eq.{merchant_id}",
             "merchant_product_id": f"eq.{merchant_product_id}",
-            "select": "id,product_variant_id",
+            "select": "id,product_variant_id,price,in_stock",
             "limit": "1",
         },
     )
@@ -318,6 +303,17 @@ def create_product_and_variant(item, merchant_product_id: str):
     return variants[0]["id"]
 
 
+def suspicious_price_drop(old_price, new_price):
+    try:
+        old = float(old_price or 0)
+        new = float(new_price or 0)
+    except (TypeError, ValueError):
+        return True
+    if old <= 0 or new <= 0:
+        return True
+    return ((old - new) / old) * 100 + 1e-9 >= MAX_PRICE_DROP_PERCENT
+
+
 def save_products_to_supabase(products):
     if not SUPABASE_SERVICE_ROLE_KEY:
         print("Supabase skipped: SUPABASE_SERVICE_ROLE_KEY tanımlı değil.")
@@ -337,6 +333,13 @@ def save_products_to_supabase(products):
             continue
 
         offer = find_offer(merchant_id, merchant_product_id)
+
+        if offer and offer.get("in_stock", True) and suspicious_price_drop(offer.get("price"), item["price"]):
+            print(
+                "Supabase skipped: suspicious Trendyol price drop "
+                f"{offer.get('price')} -> {item['price']} | {item['title']}"
+            )
+            continue
 
         if offer:
             offer_id = offer["id"]

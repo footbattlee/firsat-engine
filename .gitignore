@@ -11,3 +11,12 @@ tests/_tmp_*.py
 .env
 creative_output/
 git
+.venv/
+.pytest_cache/
+.env.*
+!.env.example
+.coverage
+htmlcov/
+reports/*_competitor_search.json
+reports/cloud_queue_render_test.png
+reports/category_search_matrix.md

@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "categories": [
     {
       "name": "Termos / Matara",
@@ -106,6 +106,102 @@
             "bebek bakım ürünleri",
             "bebek bakım seti"
           ]
+        },
+        {
+          "name": "Bebek Arabası",
+          "slug": "bebek-arabasi",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "bebek arabası"
+          ],
+          "brand_queries": [
+            "chicco bebek arabası",
+            "kraft bebek arabası"
+          ]
+        },
+        {
+          "name": "Bebek Oto Koltuğu",
+          "slug": "bebek-oto-koltugu",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "bebek oto koltuğu"
+          ],
+          "brand_queries": [
+            "cybex oto koltuğu",
+            "chicco oto koltuğu"
+          ]
+        },
+        {
+          "name": "Bebek Telsizi / Kamerası",
+          "slug": "bebek-telsizi-kamerasi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "bebek telsizi"
+          ],
+          "brand_queries": [
+            "motorola bebek telsizi",
+            "philips avent bebek telsizi"
+          ]
+        },
+        {
+          "name": "Göğüs Pompası",
+          "slug": "gogus-pompasi",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "göğüs pompası"
+          ],
+          "brand_queries": [
+            "philips avent göğüs pompası",
+            "lansinoh göğüs pompası"
+          ]
+        },
+        {
+          "name": "Biberon Sterilizatörü",
+          "slug": "biberon-sterilizatoru",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "biberon sterilizatörü"
+          ],
+          "brand_queries": [
+            "philips avent sterilizatör",
+            "chicco sterilizatör"
+          ]
+        },
+        {
+          "name": "Biberon / Mama Isıtıcısı",
+          "slug": "biberon-mama-isiticisi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "biberon mama ısıtıcı"
+          ],
+          "brand_queries": [
+            "philips avent biberon ısıtıcı",
+            "chicco biberon ısıtıcı"
+          ]
         }
       ]
     },
@@ -193,7 +289,8 @@
           "active": true,
           "queries": [
             "şampuan",
-            "saç bakım"
+            "saç bakım",
+            "saç bakım seti"
           ]
         },
         {
@@ -272,6 +369,111 @@
           ],
           "queries": [
             "diş macunu"
+          ]
+        },
+        {
+          "name": "Saç Boyası",
+          "slug": "sac-boyasi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon"
+          ],
+          "queries": [
+            "saç boyası"
+          ]
+        },
+        {
+          "name": "Saç Serumu / Yağı",
+          "slug": "sac-serumu-yagi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon"
+          ],
+          "queries": [
+            "saç serumu",
+            "saç bakım yağı"
+          ]
+        },
+        {
+          "name": "Epilatör",
+          "slug": "epilator",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "epilatör"
+          ],
+          "brand_queries": [
+            "braun silk epil",
+            "philips epilatör"
+          ]
+        },
+        {
+          "name": "Saç Düzleştirici",
+          "slug": "sac-duzlestirici",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "saç düzleştirici"
+          ],
+          "brand_queries": [
+            "remington saç düzleştirici",
+            "philips saç düzleştirici"
+          ]
+        },
+        {
+          "name": "Saç Maşası",
+          "slug": "sac-masasi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "saç maşası"
+          ],
+          "brand_queries": [
+            "babyliss saç maşası",
+            "remington saç maşası"
+          ]
+        },
+        {
+          "name": "Saç Kesme Makinesi",
+          "slug": "sac-kesme-makinesi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "saç kesme makinesi"
+          ],
+          "brand_queries": [
+            "wahl saç kesme makinesi",
+            "philips saç kesme makinesi"
           ]
         }
       ]
@@ -425,6 +627,11 @@
           "strict_match": "model",
           "queries": [
             "bluetooth kulaklık"
+          ],
+          "brand_queries": [
+            "jbl bluetooth kulaklık",
+            "anker soundcore kulaklık",
+            "huawei freebuds"
           ]
         },
         {
@@ -461,6 +668,12 @@
           "strict_match": "laptop",
           "queries": [
             "laptop"
+          ],
+          "brand_queries": [
+            "lenovo ideapad",
+            "asus vivobook",
+            "acer aspire",
+            "apple macbook air"
           ]
         },
         {
@@ -561,6 +774,12 @@
           "strict_match": "model",
           "queries": [
             "tablet"
+          ],
+          "brand_queries": [
+            "samsung galaxy tab",
+            "apple ipad",
+            "lenovo tab",
+            "redmi pad"
           ]
         },
         {
@@ -612,6 +831,11 @@
           "strict_match": "model",
           "queries": [
             "yazıcı"
+          ],
+          "brand_queries": [
+            "canon pixma yazıcı",
+            "epson ecotank yazıcı",
+            "hp laserjet yazıcı"
           ]
         },
         {
@@ -695,6 +919,120 @@
           "queries": [
             "oyuncu koltuğu"
           ]
+        },
+        {
+          "name": "Akıllı Çocuk Saati",
+          "slug": "akilli-cocuk-saati",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "akıllı çocuk saati"
+          ]
+        },
+        {
+          "name": "Sanal Gerçeklik Gözlüğü",
+          "slug": "sanal-gerceklik-gozlugu",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "sanal gerçeklik gözlüğü",
+            "vr gözlük"
+          ]
+        },
+        {
+          "name": "Soundbar",
+          "slug": "soundbar",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "soundbar"
+          ]
+        },
+        {
+          "name": "Projeksiyon Cihazı",
+          "slug": "projeksiyon-cihazi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "projeksiyon cihazı",
+            "projektör"
+          ]
+        },
+        {
+          "name": "Media Player",
+          "slug": "media-player",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "media player",
+            "android tv box"
+          ]
+        },
+        {
+          "name": "Mikrofon",
+          "slug": "mikrofon",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "mikrofon"
+          ]
+        },
+        {
+          "name": "Güvenlik / IP Kamerası",
+          "slug": "guvenlik-ip-kamerasi",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "güvenlik ip kamerası"
+          ],
+          "brand_queries": [
+            "tp link tapo kamera",
+            "xiaomi güvenlik kamerası",
+            "ezviz güvenlik kamerası"
+          ]
         }
       ]
     },
@@ -743,7 +1081,8 @@
           "active": true,
           "strict_match": "model",
           "queries": [
-            "airfryer"
+            "airfryer",
+            "fritöz"
           ]
         },
         {
@@ -752,7 +1091,9 @@
           "active": true,
           "strict_match": "model",
           "queries": [
-            "blender"
+            "blender",
+            "rondo",
+            "mikser"
           ]
         },
         {
@@ -836,6 +1177,54 @@
           "strict_match": "model",
           "queries": [
             "buharlı ütü"
+          ]
+        },
+        {
+          "name": "Isıtıcı",
+          "slug": "isitici",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "elektrikli ısıtıcı",
+            "fanlı ısıtıcı"
+          ]
+        },
+        {
+          "name": "Çay Makinesi",
+          "slug": "cay-makinesi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "çay makinesi"
+          ]
+        },
+        {
+          "name": "Hava Nemlendirici",
+          "slug": "hava-nemlendirici",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "hava nemlendirici"
           ]
         }
       ]
@@ -974,6 +1363,331 @@
           "queries": [
             "fitness ekipmanları",
             "spor ekipmanları"
+          ]
+        },
+        {
+          "name": "Elektrikli Bisiklet",
+          "slug": "elektrikli-bisiklet",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "elektrikli bisiklet"
+          ]
+        },
+        {
+          "name": "Elektrikli Scooter",
+          "slug": "elektrikli-scooter",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "elektrikli scooter"
+          ]
+        },
+        {
+          "name": "Protein Tozu",
+          "slug": "protein-tozu",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon"
+          ],
+          "queries": [
+            "protein tozu"
+          ]
+        },
+        {
+          "name": "Kreatin",
+          "slug": "kreatin",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon"
+          ],
+          "queries": [
+            "kreatin"
+          ]
+        },
+        {
+          "name": "Protein Bar",
+          "slug": "protein-bar",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon"
+          ],
+          "queries": [
+            "protein bar"
+          ]
+        },
+        {
+          "name": "Shaker",
+          "slug": "shaker",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "Amazon"
+          ],
+          "queries": [
+            "protein shaker",
+            "shaker"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Beyaz Eşya",
+      "slug": "beyaz-esya",
+      "active": true,
+      "stores": [
+        "Trendyol",
+        "Hepsiburada",
+        "n11",
+        "MediaMarkt",
+        "Vatan"
+      ],
+      "subcategories": [
+        {
+          "name": "Buzdolabı",
+          "slug": "buzdolabi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "buzdolabı"
+          ]
+        },
+        {
+          "name": "Çamaşır Makinesi",
+          "slug": "camasir-makinesi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "çamaşır makinesi"
+          ]
+        },
+        {
+          "name": "Bulaşık Makinesi",
+          "slug": "bulasik-makinesi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "bulaşık makinesi"
+          ]
+        },
+        {
+          "name": "Kurutma Makinesi",
+          "slug": "kurutma-makinesi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "kurutma makinesi"
+          ]
+        },
+        {
+          "name": "Derin Dondurucu",
+          "slug": "derin-dondurucu",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "derin dondurucu"
+          ]
+        },
+        {
+          "name": "Klima",
+          "slug": "klima",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt",
+            "Vatan"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "klima"
+          ]
+        },
+        {
+          "name": "Kombi",
+          "slug": "kombi",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "kombi"
+          ]
+        },
+        {
+          "name": "Ankastre Set",
+          "slug": "ankastre-set",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11",
+            "MediaMarkt"
+          ],
+          "strict_match": "model",
+          "queries": [
+            "ankastre set"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Öğrenci & Okul",
+      "slug": "ogrenci-okul",
+      "active": true,
+      "stores": [
+        "Trendyol",
+        "Hepsiburada",
+        "n11",
+        "MediaMarkt",
+        "Vatan"
+      ],
+      "subcategories": [
+        {
+          "name": "USB Bellek",
+          "slug": "usb-bellek",
+          "active": true,
+          "strict_match": "storage",
+          "queries": [
+            "usb bellek"
+          ],
+          "brand_queries": [
+            "sandisk usb bellek",
+            "kingston usb bellek"
+          ]
+        },
+        {
+          "name": "Bilimsel Hesap Makinesi",
+          "slug": "bilimsel-hesap-makinesi",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "bilimsel hesap makinesi"
+          ],
+          "brand_queries": [
+            "casio bilimsel hesap makinesi"
+          ]
+        },
+        {
+          "name": "Okul / Sırt Çantası",
+          "slug": "okul-sirt-cantasi",
+          "active": true,
+          "queries": [
+            "okul çantası"
+          ],
+          "brand_queries": [
+            "eastpak sırt çantası",
+            "kaukko okul çantası"
+          ]
+        },
+        {
+          "name": "Webcam",
+          "slug": "webcam",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "webcam"
+          ],
+          "brand_queries": [
+            "logitech webcam"
+          ]
+        },
+        {
+          "name": "Çalışma Masası Lambası",
+          "slug": "calisma-masasi-lambasi",
+          "active": true,
+          "strict_match": "model",
+          "queries": [
+            "çalışma masası lambası"
+          ],
+          "brand_queries": [
+            "xiaomi masa lambası"
+          ]
+        },
+        {
+          "name": "A4 Fotokopi Kâğıdı",
+          "slug": "a4-fotokopi-kagidi",
+          "active": true,
+          "queries": [
+            "a4 fotokopi kağıdı"
+          ],
+          "brand_queries": [
+            "navigator a4 kağıt",
+            "paper one a4 kağıt"
+          ]
+        },
+        {
+          "name": "Kitap",
+          "slug": "kitap",
+          "active": true,
+          "stores": [
+            "Trendyol",
+            "Hepsiburada",
+            "n11"
+          ],
+          "queries": [
+            "kitap"
           ]
         }
       ]

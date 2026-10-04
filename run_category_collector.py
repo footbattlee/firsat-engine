@@ -196,6 +196,53 @@ def focused_category_relevant(query, raw_title):
             r"hava temizleyici(?:si)?|hava temizleme cihazi",
             r"air purifier|air performer|puricare",
         ),
+        "mikrofon": (
+            r"mikrofon(?:u)?|microphone|mic\b",
+            r"yaka mikrofonu|yayinci mikrofonu|kondenser mikrofon|dinamik mikrofon",
+        ),
+        "elektrikli scooter": (
+            r"elektrikli scooter|electric scooter",
+        ),
+        "hava nemlendirici": (
+            r"hava nemlendirici(?:si)?|ortam nemlendirici|oda nemlendirici",
+            r"humidifier|nemlendirme cihazi|buhar makinesi",
+        ),
+        "bebek arabasi": (
+            r"bebek arabasi|travel sistem|travel system|pusetli bebek arabasi|puset",
+        ),
+        "bebek oto koltugu": (
+            r"bebek oto koltugu|cocuk oto koltugu|oto koltugu|arac koltugu|car seat",
+        ),
+        "bebek telsizi": (
+            r"bebek telsizi|bebek monitoru|bebek kamerasi|baby monitor|motorola vm\d+|philips avent scd\d+",
+        ),
+        "gogus pompasi": (
+            r"gogus pompasi|sut pompasi|breast pump",
+        ),
+        "biberon sterilizatoru": (
+            r"biberon sterilizatoru|buharli sterilizator|steam sterilizer|sterilizator",
+        ),
+        "biberon mama isitici": (
+            r"biberon isitici|mama isitici|bottle warmer|philips avent scf35[58]",
+        ),
+        "epilator": (
+            r"epilator|epilasyon cihazi|silk epil",
+        ),
+        "sac duzlestirici": (
+            r"sac duzlestirici|hair straightener|corrale",
+        ),
+        "sac masasi": (
+            r"sac masasi|bukle masasi|curling iron|hair curler",
+        ),
+        "sac kesme makinesi": (
+            r"sac kesme makinesi|hair clipper|sac sakal kesme makinesi",
+        ),
+        "kitap": (
+            r"kitap|roman|ciltli|ciltsiz",
+        ),
+        "guvenlik ip kamerasi": (
+            r"guvenlik kamerasi|ip kamera|wifi kamera|wi fi kamera|akilli kamera|network camera",
+        ),
     }
     if query not in evidence:
         return None
@@ -228,6 +275,21 @@ def focused_category_relevant(query, raw_title):
         "elektrikli dis fircasi": r"yedek baslik|firca basligi|replacement head|sarj (?:aleti|cihazi|kablosu)|charger",
 
         "hava temizleyici": r"yedek filtre|replacement filter|filtre seti|filtre kartusu|uyumlu filtre",
+        "mikrofon": r"mikrofon standi|masa standi|boom arm|pop filtre(?:si)?|shock mount|mikrofon tutucu(?:su)?|mikrofon kablosu|mikrofon kilifi",
+        "elektrikli scooter": r"tekerle(?:k)?|lastik|ic lastik|tubeless|jant|fren balat(?:a|asi)|sarj (?:aleti|cihazi)|charger|yedek parca",
+        "hava nemlendirici": r"ucucu yag|esansiyel yag|koku yagi|buhurdanlik yagi|aroma yagi",
+        "bebek arabasi": r"yagmur ortusu|puset ortusu|sineklik|bardaklik|tekerlek|adapter|adaptor|organizer|puseti icin|bebek arabasi icin|uyumlu",
+        "bebek oto koltugu": r"kilif|koruyucu|minder|adapter|adaptor|isofix baza|isofix base|koltuk arkasi|oto koltugu icin|uyumlu",
+        "bebek telsizi": r"tutucu|stand|montaj aparati|duvar aparati|kablo|sarj cihazi|adapter|adaptor|kilif|bebek monitoru icin|uyumlu",
+        "gogus pompasi": r"yedek|flans|gogus kalkan|valf|hortum|saklama poseti|gogus pompasi icin|uyumlu",
+        "biberon sterilizatoru": r"yedek|masa ustu raf|kurutma rafi|sterilizator icin|uyumlu",
+        "biberon mama isitici": r"yedek|termos|saklama cantasi|isitici icin|uyumlu",
+        "epilator": r"yedek baslik|epilator basligi|kilif|case|sarj cihazi|adapter|epilator icin|uyumlu",
+        "sac duzlestirici": r"kilif|case|isiya dayanikli mat|heat mat|stand|yedek|duzlestirici icin|uyumlu",
+        "sac masasi": r"kilif|case|isiya dayanikli mat|heat mat|stand|yedek|masa icin|uyumlu",
+        "sac kesme makinesi": r"yedek bicak|yedek baslik|tarak seti|kilif|case|sarj cihazi|adapter|makine icin|uyumlu",
+        "kitap": r"kitaplik|kitap destegi|kitap standi|kitap ayraci|e kitap okuyucu|defter|ajanda|kilif|case",
+        "guvenlik ip kamerasi": r"montaj aparati|duvar aparati|bracket|hafiza karti|sd kart|kablo|sarj cihazi|adapter|adaptor|kamera icin|uyumlu|dummy kamera|sahte kamera",
     }
 
     # These phrases describe features of a complete device, not a spare part.
@@ -287,6 +349,58 @@ def focused_category_relevant(query, raw_title):
                 hit = matches(r"(?:celik|anahtarsiz) mandren", checked)
                 if hit and positive(checked[:hit.start()]):
                     checked = checked[:hit.start()] + checked[hit.end():]
+            elif query in {"bebek arabasi", "bebek oto koltugu", "bebek telsizi"}:
+                checked = re.sub(
+                    r"\b(?:isofix baza|adapter|adaptor|sarj cihazi|kablo)(?:su)? (?:dahil|ile birlikte|hediyeli)\b",
+                    "",
+                    checked,
+                )
+            elif query in {"epilator", "sac duzlestirici", "sac masasi", "sac kesme makinesi"}:
+                checked = re.sub(
+                    r"\b(?:sarj cihazi|adapter|adaptor|kilif|case) (?:dahil|ile birlikte|hediyeli)\b",
+                    "",
+                    checked,
+                )
+            elif query == "mikrofon":
+                # Accessory listings can contain the word "mikrofon", e.g.
+                # "pop filtre mikrofon aksesuari". Do not treat those as devices.
+                accessory_context = matches(
+                    r"mikrofon aksesuari|mikrofon icin|mikrofon uyumlu|"
+                    r"microphone accessory|for microphone",
+                    text,
+                )
+
+                # Strong device evidence means the title independently describes
+                # an actual microphone, not merely an accessory for one.
+                device_evidence = matches(
+                    r"yaka mikrofonu|yayinci mikrofonu|oyuncu mikrofonu|"
+                    r"kondenser mikrofon|studyo mikrofon(?:u)?|dinamik mikrofon|usb mikrofon|"
+                    r"kablosuz mikrofon|karaoke mikrofonu|podcast mikrofonu|"
+                    r"microphone",
+                    text,
+                )
+
+                if device_evidence and not accessory_context:
+                    checked = re.sub(
+                        r"\b(?:dahili |entegre )?pop filtre(?:si)?\b",
+                        "",
+                        checked,
+                    )
+                    checked = re.sub(
+                        r"\b(?:masa )?standi ve pop filtre(?:si)? hediyeli\b",
+                        "",
+                        checked,
+                    )
+                    checked = re.sub(
+                        r"\b(?:masa )?stand(?:i)?(?: hediyeli)?\b",
+                        "",
+                        checked,
+                    )
+                    checked = re.sub(
+                        r"\bshock mount\b",
+                        "",
+                        checked,
+                    )
         return matches(accessory_patterns[query], checked)
 
     if query == "dikey supurge" and matches(r"robot", title):
@@ -313,6 +427,11 @@ def focused_category_relevant(query, raw_title):
         )
         if not (explicit_bundle or tablet_bundle):
             return False, "accessory-only:" + hit.group(0)
+    # Book listings often contain only title, author and publisher. The exact
+    # store search supplies category context, while the accessory check above
+    # still blocks bookcases, stands, bookmarks and e-reader accessories.
+    if query == "kitap":
+        return True, None
     if not positive(title):
         return False, "category-term-missing"
     return True, None
@@ -397,6 +516,30 @@ def category_relevant(query, product):
         "oyun konsolu": (("playstation", "ps5", "xbox", "nintendo switch", "oyun konsolu"), ("kilif", "stand", "sarj istasyonu", "oyun kolu", "controller")),
         "yazici": (("yazici", "printer", "laserjet", "deskjet", "ecotank"), ("kartus", "toner", "murekkep", "kagit")),
         "microsd hafiza karti": (("microsd", "micro sd", "hafiza karti", "memory card"), ("kart okuyucu", "card reader", "adapter", "adaptor")),
+        "usb bellek": (
+            ("usb bellek", "flash bellek", "usb flash", "flash drive"),
+            ("kart okuyucu", "card reader", "usb hub", "kablo")
+        ),
+        "bilimsel hesap makinesi": (
+            ("hesap makinesi", "calculator", "fx-"),
+            ("kilif", "case")
+        ),
+        "okul cantasi": (
+            ("okul cantasi", "sirt cantasi", "backpack"),
+            ("anahtarlik", "kalemlik", "yagmur kilifi")
+        ),
+        "webcam": (
+            ("webcam", "web kamera"),
+            ("tripod", "kapak", "cover", "kablo")
+        ),
+        "calisma masasi lambasi": (
+            ("masa lambasi", "calisma lambasi", "desk lamp"),
+            ("ampul", "yedek")
+        ),
+        "a4 fotokopi kagidi": (
+            ("fotokopi kagidi", "a4 kagit", "copy paper"),
+            ("fotograf kagidi", "etiket", "defter")
+        ),
         "dijital kamera": (("kamera", "camera", "mirrorless", "dslr"), ("kamera cantasi", "camera bag", "batarya", "pil", "sarj cihazi", "lens kapagi", "tripod")),
         "oyuncu koltugu": (("oyuncu koltugu", "gaming chair"), ("koltuk kilifi", "tekerlek")),
         "ipl epilasyon cihazi": (("ipl", "lumea", "silk expert", "epilasyon"), ("baslik", "kilif")),
@@ -442,6 +585,141 @@ def category_relevant(query, product):
         "arac ici aksesuar": (("arac", "oto", "otomobil", "car"), ()),
         "fitness ekipmanlari": (("fitness", "dambıl", "dambil", "halter", "direnc", "egzersiz", "yoga"), ()),
         "spor ekipmanlari": (("spor", "fitness", "dambıl", "dambil", "halter", "egzersiz", "yoga"), ()),
+        # categories.json v4 - new category rules
+        "sac bakim seti": (("sac", "sampuan", "shampoo", "bakim"), ()),
+        "rondo": (("rondo", "dograyici", "chopper"), ("yedek", "bicak", "hazne")),
+        "mikser": (("mikser", "mixer"), ("yedek", "cirpici", "karistirici ucu")),
+        "fritoz": (("fritoz", "airfryer", "air fryer", "sicak hava fritoz"), ("pisirme kagidi", "silikon hazne", "aksesuar")),
+
+        "akilli cocuk saati": (
+            ("akilli cocuk saati", "cocuk akilli saati", "gps cocuk saati", "kids smartwatch"),
+            ("kayis", "kordon", "ekran koruyucu", "kilif", "sarj kablosu")
+        ),
+        "sanal gerceklik gozlugu": (
+            ("sanal gerceklik", "vr gozluk", "vr headset", "virtual reality"),
+            ("kilif", "case", "yuz pedi", "yedek ped", "kayis")
+        ),
+        "vr gozluk": (
+            ("vr gozluk", "sanal gerceklik", "vr headset", "virtual reality"),
+            ("kilif", "case", "yuz pedi", "yedek ped", "kayis")
+        ),
+        "soundbar": (
+            ("soundbar", "sound bar"),
+            ("duvar aparati", "bracket", "kumanda", "remote")
+        ),
+        "projeksiyon cihazi": (
+            ("projeksiyon", "projektor", "projector"),
+            ("perde", "aski aparati", "lamba", "ampul", "kumanda")
+        ),
+        "projektor": (
+            ("projektor", "projeksiyon", "projector"),
+            ("perde", "aski aparati", "lamba", "ampul", "kumanda")
+        ),
+        "media player": (
+            ("media player", "tv box", "android box", "streaming box"),
+            ("kumanda", "remote", "kilif", "adaptoru", "adapter")
+        ),
+        "android tv box": (
+            ("android tv box", "tv box", "media player", "android box"),
+            ("kumanda", "remote", "kilif", "adaptoru", "adapter")
+        ),
+        "mikrofon": (
+            ("mikrofon", "microphone"),
+            ("mikrofon standi", "pop filtre", "pop filter", "shock mount", "kablo")
+        ),
+
+        "elektrikli isitici": (
+            ("elektrikli isitici", "fanli isitici", "konvektor", "heater"),
+            ("yedek",)
+        ),
+        "fanli isitici": (
+            ("fanli isitici", "elektrikli isitici", "fan heater"),
+            ("yedek",)
+        ),
+        "cay makinesi": (
+            ("cay makinesi", "cayci", "tea maker"),
+            ("yedek", "demlik", "filtre")
+        ),
+        "hava nemlendirici": (
+            ("hava nemlendirici", "nemlendirici", "humidifier"),
+            ("yedek filtre", "replacement filter", "filtre kartusu")
+        ),
+
+        "sac boyasi": (
+            ("sac boyasi", "hair color", "hair dye"),
+            ()
+        ),
+        "sac serumu": (
+            ("sac serumu", "hair serum"),
+            ()
+        ),
+        "sac bakim yagi": (
+            ("sac yagi", "sac bakim yagi", "hair oil"),
+            ()
+        ),
+
+        "elektrikli bisiklet": (
+            ("elektrikli bisiklet", "e-bike", "ebike"),
+            ("yedek", "batarya", "sarj cihazi", "lastik")
+        ),
+        "elektrikli scooter": (
+            ("elektrikli scooter", "e-scooter", "electric scooter"),
+            ("yedek", "lastik", "batarya", "sarj cihazi")
+        ),
+
+        "protein tozu": (
+            ("protein tozu", "whey protein", "whey"),
+            ("shaker", "protein bar")
+        ),
+        "kreatin": (
+            ("kreatin", "creatine"),
+            ("shaker",)
+        ),
+        "protein bar": (
+            ("protein bar", "proteinli bar"),
+            ("protein tozu", "whey protein")
+        ),
+        "protein shaker": (
+            ("shaker", "protein shaker"),
+            ("protein tozu", "whey protein", "kreatin")
+        ),
+        "shaker": (
+            ("shaker", "protein shaker"),
+            ("protein tozu", "whey protein", "kreatin")
+        ),
+
+        "buzdolabi": (
+            ("buzdolabi", "refrigerator", "fridge"),
+            ("yedek", "raf", "cekmece", "filtre")
+        ),
+        "camasir makinesi": (
+            ("camasir makinesi", "washing machine"),
+            ("yedek", "hortum", "filtre", "kapak")
+        ),
+        "bulasik makinesi": (
+            ("bulasik makinesi", "dishwasher"),
+            ("tablet", "deterjan", "parlatici", "tuz", "yedek", "sepet")
+        ),
+        "kurutma makinesi": (
+            ("kurutma makinesi", "kurutucu", "tumble dryer"),
+            ("yedek", "filtre", "kurutma topu")
+        ),
+        "derin dondurucu": (
+            ("derin dondurucu", "deep freezer", "freezer"),
+            ("yedek", "sepet", "cekmece")
+        ),
+        "klima": (
+            ("klima", "air conditioner"),
+            ("klima kumandasi", "kumanda", "klima temizleyici", "montaj seti")
+        ),
+        "kombi": (
+            ("kombi", "combi boiler"),
+            ("yedek", "termostat", "baca", "pompa")
+        ),
+        "ankastre set": (
+            ("ankastre set", "ankastre paket"),
+            ("yedek",)
+        ),
     }
 
     rule = rules.get(q)
@@ -460,6 +738,66 @@ def category_relevant(query, product):
 
     accessory_only_phrases = {
         "bluetooth kulaklik": ("kulaklik kilifi",),
+        "laptop": ("laptop cantasi", "notebook cantasi", "laptop standi", "notebook standi", "laptop kilifi", "notebook kilifi"),
+        "usb bellek": ("usb bellek kutusu", "usb bellek kilifi"),
+        "bilimsel hesap makinesi": ("hesap makinesi kilifi", "calculator case"),
+        "webcam": ("webcam tripodu", "webcam tripod", "webcam kapagi", "webcam cover"),
+        "calisma masasi lambasi": ("masa lambasi ampulu", "desk lamp bulb"),
+        "a4 fotokopi kagidi": ("a4 fotograf kagidi", "a4 etiket"),
+        # categories.json v4 accessory protection
+        "buzdolabi": (
+            "buzdolabi yedek raf",
+            "buzdolabi yedek parca",
+            "buzdolabi cekmecesi",
+            "buzdolabi filtresi",
+        ),
+        "mikrofon": (
+            "mikrofon standi",
+            "mikrofon ayagi",
+            "mikrofon kablosu",
+            "mikrofon tutucu",
+            "pop filtre",
+            "pop filter",
+            "shock mount",
+        ),
+        "soundbar": (
+            "soundbar duvar aparati",
+            "soundbar kumandasi",
+            "soundbar remote",
+        ),
+        "projeksiyon cihazi": (
+            "projeksiyon perdesi",
+            "projeksiyon askisi",
+            "projeksiyon aski aparati",
+            "projeksiyon lambasi",
+            "projeksiyon ampulu",
+            "projeksiyon kumandasi",
+        ),
+        "projektor": (
+            "projektor perdesi",
+            "projektor aski aparati",
+            "projektor lambasi",
+            "projektor ampulu",
+            "projektor kumandasi",
+        ),
+        "android tv box": (
+            "android tv box kumandasi",
+            "android tv box remote",
+            "tv box kumandasi",
+            "tv box remote",
+        ),
+        "media player": (
+            "media player kumandasi",
+            "media player remote",
+            "tv box kumandasi",
+            "tv box remote",
+        ),
+        "klima": (
+            "klima kumandasi",
+            "klima temizleyici",
+            "klima montaj seti",
+            "klima yedek parca",
+        ),
     }
     for phrase in accessory_only_phrases.get(q, ()):
         if phrase in title:
@@ -493,6 +831,12 @@ def category_relevant(query, product):
         "oyun konsolu",
         "yazici",
         "microsd hafiza karti",
+        "usb bellek",
+        "bilimsel hesap makinesi",
+        "okul cantasi",
+        "webcam",
+        "calisma masasi lambasi",
+        "a4 fotokopi kagidi",
         "dijital kamera",
         "oyuncu koltugu",
         "ipl epilasyon cihazi",
@@ -501,6 +845,41 @@ def category_relevant(query, product):
         "buharli utu",
         "akilli baskul",
         "dis macunu",
+        "sac bakim seti",
+        "rondo",
+        "mikser",
+        "fritoz",
+        "akilli cocuk saati",
+        "sanal gerceklik gozlugu",
+        "vr gozluk",
+        "soundbar",
+        "projeksiyon cihazi",
+        "projektor",
+        "media player",
+        "android tv box",
+        "mikrofon",
+        "elektrikli isitici",
+        "fanli isitici",
+        "cay makinesi",
+        "hava nemlendirici",
+        "sac boyasi",
+        "sac serumu",
+        "sac bakim yagi",
+        "elektrikli bisiklet",
+        "elektrikli scooter",
+        "protein tozu",
+        "kreatin",
+        "protein bar",
+        "protein shaker",
+        "shaker",
+        "buzdolabi",
+        "camasir makinesi",
+        "bulasik makinesi",
+        "kurutma makinesi",
+        "derin dondurucu",
+        "klima",
+        "kombi",
+        "ankastre set",
     }
     if q in positive_required_queries:
         if normalized_required and not has_positive_evidence:
@@ -525,15 +904,26 @@ def filter_category_products(query, products):
         print(f"CATEGORY FILTER | query={query!r} | kept={len(kept)} | rejected={rejected}")
     return kept
 
-def run_sync_collector(module, query: str) -> int:
+def collector_limit(module):
+    raw = os.getenv("PRODUCT_LIMIT", str(getattr(module, "LIMIT", 20)))
+    try:
+        limit = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError("PRODUCT_LIMIT pozitif tam sayi olmali") from None
+    if limit <= 0:
+        raise ValueError("PRODUCT_LIMIT pozitif tam sayi olmali")
+    return limit
+
+
+def run_sync_collector(module, query: str, filter_query: str | None = None) -> int:
     collect = getattr(module, "collect", None)
     save = getattr(module, "save_products_to_supabase", None)
     if not callable(collect) or not callable(save):
         raise RuntimeError("Collector collect/save_products_to_supabase arayüzünü desteklemiyor.")
 
-    limit = getattr(module, "LIMIT", 20)
+    limit = collector_limit(module)
     products = collect(query=query, limit=limit)
-    products = filter_category_products(query, products)
+    products = filter_category_products(filter_query or query, products)
 
     result = {
         "ok": bool(products),
@@ -555,9 +945,10 @@ def run_sync_collector(module, query: str) -> int:
     return 0
 
 
-def run_async_collector(module, query: str) -> int:
+def run_async_collector(module, query: str, filter_query: str | None = None) -> int:
     # Trendyol main() sorguyu DEFAULT_QUERY değişkeninden çalışma anında okuyor.
     module.DEFAULT_QUERY = query
+    module.LIMIT = collector_limit(module)
     main = getattr(module, "main", None)
     if not callable(main):
         raise RuntimeError("Collector main() fonksiyonu bulunamadı.")
@@ -577,14 +968,15 @@ def run_async_collector(module, query: str) -> int:
 
 
 def main():
-    if len(sys.argv) != 3:
-        print("Kullanım: python run_category_collector.py <collector.py> <query>")
+    if len(sys.argv) not in {3, 4}:
+        print("Kullanım: python run_category_collector.py <collector.py> <query> [filter_query]")
         raise SystemExit(2)
 
     script = Path(sys.argv[1])
     if not script.is_absolute():
         script = (ROOT / script).resolve()
     query = sys.argv[2].strip()
+    filter_query = sys.argv[3].strip() if len(sys.argv) == 4 else query
 
     if not script.exists():
         print(f"Collector bulunamadı: {script}")
@@ -600,13 +992,13 @@ def main():
     # mağaza isteklerine ortak proxy uygulanır. Supabase istekleri proxylenmez.
     if callable(getattr(module, "collect", None)):
         enable_requests_proxy(settings)
-        raise SystemExit(run_sync_collector(module, query))
+        raise SystemExit(run_sync_collector(module, query, filter_query))
 
     # Playwright tabanlı collector'larda browser launch seviyesinde aynı proxy uygulanır.
     # Inject the same pre-persistence category gate used by sync collectors.
-    module.CATEGORY_FILTER = filter_category_products
+    module.CATEGORY_FILTER = lambda _query, products: filter_category_products(filter_query, products)
     enable_playwright_proxy(module, settings)
-    raise SystemExit(run_async_collector(module, query))
+    raise SystemExit(run_async_collector(module, query, filter_query))
 
 
 if __name__ == "__main__":

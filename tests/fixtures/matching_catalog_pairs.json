@@ -1,0 +1,121 @@
+[
+  {
+    "label": "sleepy 156 Adet",
+    "expected": true,
+    "source": "read-only catalog snapshot 2026-09-27",
+    "a": {
+      "title": "Sleepy Natural Double Soft Ultra Fırsat Paketi Bebek Bezi 5 Numara Junior 156 Adet",
+      "brand": "Sleepy",
+      "merchant_id": "2befbabc-fbd5-409f-bf74-0b58747e1e17",
+      "gtin": null
+    },
+    "b": {
+      "title": "Sleepy Natural Double Soft Ultra Fırsat Paketi Bebek Bezi 5 Numara Junior 156 Adet Fiyatları ve Özellikleri",
+      "brand": "Sleepy",
+      "merchant_id": "bc3d4998-0c99-475e-b8cd-697c8db90136",
+      "gtin": null
+    }
+  },
+  {
+    "label": "enjoy 15 Kg",
+    "expected": true,
+    "source": "read-only catalog snapshot 2026-09-27",
+    "a": {
+      "title": "Biftekli Yetişkin Köpek Maması 15 Kg",
+      "brand": "Enjoy",
+      "merchant_id": "ac209543-d5c3-4606-812b-8bcfa79e4ee9",
+      "gtin": null
+    },
+    "b": {
+      "title": "Enjoy Biftekli Yetişkin Köpek Maması 15 Kg",
+      "brand": "Enjoy",
+      "merchant_id": "2befbabc-fbd5-409f-bf74-0b58747e1e17",
+      "gtin": null
+    }
+  },
+  {
+    "label": "magly 72 Parça",
+    "expected": true,
+    "source": "read-only catalog snapshot 2026-09-27",
+    "a": {
+      "title": "Magly Manyetik Yapı Blokları – Çocuklar Için Renkli 3 Boyutlu 72 Parça Manyetik Karo Oyun Seti Fiyatları ve Özellikleri",
+      "brand": "Magly",
+      "merchant_id": "bc3d4998-0c99-475e-b8cd-697c8db90136",
+      "gtin": null
+    },
+    "b": {
+      "title": "Manyetik Yapı Blokları – Çocuklar İçin Renkli 3 Boyutlu 72 Parça Manyetik Karo Oyun Seti",
+      "brand": "Magly",
+      "merchant_id": "ac209543-d5c3-4606-812b-8bcfa79e4ee9",
+      "gtin": null
+    }
+  },
+  {
+    "label": "tefal Ingenio Ceramic Renew",
+    "expected": true,
+    "source": "read-only catalog snapshot 2026-09-27",
+    "a": {
+      "title": "Ingenio Ceramic Renew İndüksiyon Tabanlı 3 Parça Tava Seti",
+      "brand": "TEFAL",
+      "merchant_id": "ac209543-d5c3-4606-812b-8bcfa79e4ee9",
+      "gtin": null
+    },
+    "b": {
+      "title": "Tefal Ingenio Ceramic Renew İndüksiyon Tabanlı 3 Parça Tava Seti",
+      "brand": "Tefal",
+      "merchant_id": "2befbabc-fbd5-409f-bf74-0b58747e1e17",
+      "gtin": null
+    }
+  },
+  {
+    "label": "lorealparis 1.5N",
+    "expected": true,
+    "source": "read-only catalog snapshot 2026-09-27",
+    "a": {
+      "title": "True Match Bakım Yapan Fondöten - 1.5N Nötr Alt Ton",
+      "brand": "L'Oreal Paris",
+      "merchant_id": "ac209543-d5c3-4606-812b-8bcfa79e4ee9",
+      "gtin": null
+    },
+    "b": {
+      "title": "L'Oreal Paris True Match Bakım Yapan Fondöten - 1.5N Nötr Alt Ton",
+      "brand": "L'Oreal Paris",
+      "merchant_id": "2befbabc-fbd5-409f-bf74-0b58747e1e17",
+      "gtin": null
+    }
+  },
+  {
+    "label": "philips MG3946/15",
+    "expected": true,
+    "source": "read-only catalog snapshot 2026-09-27",
+    "a": {
+      "title": "Philips 3000 Serisi 9in1,Erkek Bakım Seti,Yüz/Saç/Vücut Tıraş Makinesi,Islak/Kuru Kullanım,MG3946/15",
+      "brand": "Philips",
+      "merchant_id": "2befbabc-fbd5-409f-bf74-0b58747e1e17",
+      "gtin": null
+    },
+    "b": {
+      "title": "Philips 3000Serisi 9in1,Erkek Bakım Seti,Yüz/Saç/Vücut Tıraş Makinesi, MG3946/15",
+      "brand": "PHILIPS",
+      "merchant_id": "18d3bf4b-34f1-4f41-ab4d-eb89d5da549e",
+      "gtin": null
+    }
+  },
+  {
+    "label": "epson L3251",
+    "expected": true,
+    "source": "read-only catalog snapshot 2026-09-27",
+    "a": {
+      "title": "EPSON L3251 MEAF Yazıcı-Tarayıcı-Fotokopi Renkli Wi-Fi Mürekkep Tanklı Yazıcı",
+      "brand": "EPSON",
+      "merchant_id": "1345b699-088d-4814-9824-a29cc094873f",
+      "gtin": "8715946684239"
+    },
+    "b": {
+      "title": "Epson L3251 MEAF Yazıcı-Tarayıcı-Fotokopi Renkli Mürekkep Tanklı Yazıcı WI-FI",
+      "brand": "Epson",
+      "merchant_id": "2befbabc-fbd5-409f-bf74-0b58747e1e17",
+      "gtin": null
+    }
+  }
+]

@@ -189,6 +189,23 @@ def collect(query=DEFAULT_QUERY, limit=LIMIT):
     print("Opening source:", search_url)
     r = fetch(session, search_url)
     print("Source HTTP:", r.status_code)
+
+    # Vatan can return a valid HTTP 200 search page with zero actual
+    # search results. In that case the page may still contain unrelated
+    # recommendation/product links. Do not treat those links as results.
+    zero_result = (
+        re.search(r'"ProductCount"\s*:\s*0\b', r.text, flags=re.I) is not None
+        or re.search(
+            r'araman?\w*\s*ilgili\s*0\s*adet\s*urun\s*bulundu',
+            normalize_text(r.text),
+            flags=re.I,
+        ) is not None
+    )
+
+    if zero_result:
+        print(f"Search returned 0 products for query: {query}")
+        return []
+
     urls = extract_product_urls(r.text, max(limit * 10, 80))
     print("Candidate product URLs:", len(urls))
 

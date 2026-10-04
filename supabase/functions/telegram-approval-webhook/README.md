@@ -2,13 +2,14 @@
 
 Production callback handling is deployed to Supabase Edge Functions as `telegram-approval-webhook`.
 
-Flow: Telegram inline callback -> Edge Function -> Supabase publication state -> Telegram public channel + Instagram + Facebook.
+Flow: Telegram inline callback -> Edge Function -> Reels selection / rejection / helper actions. Normal Instagram posts are handled by the cloud publication queue.
 
-The cloud handler reuses the photo attached to the admin approval message, so PAYLAŞ/REDDET does not depend on a local PC or Pillow process. Existing `deal_publications` rows provide per-platform idempotency.
+The normal PAYLAS action on old cards acknowledges the automatic queue; it does not publish immediately. Reels remain a separate manual action. Existing `deal_publications` rows provide per-platform idempotency. See the root PUBLICATION_QUEUE.md for the active schedule.
 
 Required Edge Function secrets (never commit values):
 - TELEGRAM_BOT_TOKEN
 - TELEGRAM_PUBLISH_CHAT_ID
+- TELEGRAM_APPROVAL_CHAT_ID
 - TELEGRAM_WEBHOOK_SECRET
 - INSTAGRAM_ACCESS_TOKEN
 - INSTAGRAM_USER_ID
@@ -16,6 +17,7 @@ Required Edge Function secrets (never commit values):
 - FACEBOOK_PAGE_ID
 
 Optional:
+- TELEGRAM_STORY_CHAT_ID (varsayılan: TELEGRAM_APPROVAL_CHAT_ID)
 - INSTAGRAM_GRAPH_BASE
 - FACEBOOK_GRAPH_VERSION
 - INSTAGRAM_MEDIA_BUCKET

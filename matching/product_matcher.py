@@ -4,6 +4,8 @@ import os
 import re
 import unicodedata
 from difflib import SequenceMatcher
+from functools import lru_cache
+from collections import defaultdict
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -75,6 +77,7 @@ def sb_get(table, params=None):
 
     while True:
         query = dict(params or {})
+        query.setdefault("order", "id")
         query["limit"] = page_size
         query["offset"] = offset
         url = base_url + "?" + urlencode(query, doseq=True, safe="(),.*:-")
@@ -91,6 +94,7 @@ def sb_get(table, params=None):
     return rows
 
 
+@lru_cache(maxsize=32768)
 def normalize_text(value):
     value = unicodedata.normalize("NFKD", (value or "").casefold().strip())
     value = "".join(ch for ch in value if not unicodedata.combining(ch))
@@ -99,6 +103,7 @@ def normalize_text(value):
     return re.sub(r"\s+", " ", value).strip()
 
 
+@lru_cache(maxsize=32768)
 def normalize_brand(value):
     return normalize_text(value).replace(" ", "")
 
@@ -125,6 +130,7 @@ def _decimal_to_float(raw):
     return float(raw)
 
 
+@lru_cache(maxsize=32768)
 def extract_volume_ml(title):
     raw = (title or "").casefold()
 
@@ -175,13 +181,14 @@ def extract_colors(title):
     return {COLOR_FAMILIES.get(x, x) for x in found}
 
 
+@lru_cache(maxsize=32768)
 def extract_model_tokens(title):
     raw = unicodedata.normalize("NFKD", (title or "").upper())
     raw = "".join(ch for ch in raw if not unicodedata.combining(ch))
 
     candidates = re.findall(
-        r"\b[A-Z]{1,8}\d{2,}[A-Z0-9]*(?:/\d{1,4})?\b|"
-        r"\b[A-Z0-9]+(?:-[A-Z0-9]+)+(?:/\d{1,4})?\b",
+        r"\b[A-Z0-9]+(?:-[A-Z0-9]+)+(?:/[A-Z0-9]+)?\b|"
+        r"\b[A-Z]{1,8}\d{2,}[A-Z0-9]*(?:[./][A-Z0-9]+)?\b",
         raw,
     )
     result = set()
@@ -200,10 +207,13 @@ def extract_model_tokens(title):
         if not any(ch.isdigit() for ch in token):
             continue
 
+        if re.fullmatch(r"(?:IP\d+[A-Z]?|BT\d+|USB\d+|SPF\d+|DDR\d+)", token):
+            continue
         result.add(token)
     return result
 
 
+@lru_cache(maxsize=32768)
 def extract_age_ranges(title):
     raw = normalize_text(title)
     ranges = set()
@@ -213,15 +223,50 @@ def extract_age_ranges(title):
     return ranges
 
 
+@lru_cache(maxsize=32768)
 def extract_pack_counts(title):
     raw = normalize_text(title)
     values = set()
-    for value in re.findall(r"\b(\d{1,4})\s*(?:adet|li paket|li)\b", raw):
+    for value in re.findall(r"\b(\d{1,4})\s*(?:adet|li paket|li|parca|yikama)\b", raw):
         amount = int(value)
-        if 2 <= amount <= 1000:
+        if 1 <= amount <= 1000:
             values.add(amount)
     return values
 
+
+
+@lru_cache(maxsize=32768)
+def extract_weight_grams(title):
+    raw = (title or "").casefold()
+    values = set()
+
+    # 300g / 300 g / 300gr / 300 gr / 300 gram
+    for value in re.findall(
+        r"(?<![\d.,])(\d+(?:[\.,]\d+)?)\s*(?:g|gr|gram)\b",
+        raw,
+    ):
+        try:
+            grams = _decimal_to_float(value)
+        except ValueError:
+            continue
+
+        if 0 < grams <= 100000:
+            values.add(int(round(grams)))
+
+    # 1kg / 1 kg / 1.5kg / 1,5 kg
+    for value in re.findall(
+        r"(?<![\d.,])(\d+(?:[\.,]\d+)?)\s*(?:kg|kilogram)\b",
+        raw,
+    ):
+        try:
+            kilograms = _decimal_to_float(value)
+        except ValueError:
+            continue
+
+        if 0 < kilograms <= 100:
+            values.add(int(round(kilograms * 1000)))
+
+    return values
 
 def model_evidence_compatible(a, b):
     # Technology products use their own family/model compatibility rules.
@@ -242,7 +287,23 @@ def model_evidence_compatible(a, b):
     return True, None
 
 
+def apparel_variant(title):
+    text = normalize_text(title)
+    apparel = bool(re.search(
+        r"\b(?:tisort|t shirt|tshirt|gomlek|pantolon|elbise|sweatshirt|hoodie|ayakkabi|sneaker)\b", text))
+    sizes = set(re.findall(r"\b(?:xxxs|xxs|xs|s|m|l|xl|xxl|xxxl|[2-6]xl)\b", text))
+    sizes |= set(re.findall(r"\b(?:beden|size|numara)\s*(\d{2})\b", text))
+    return apparel, sizes, extract_colors(title)
+
+
 def variant_evidence_compatible(a, b):
+    apparel_a, sizes_a, colors_a = apparel_variant(a["title"])
+    apparel_b, sizes_b, colors_b = apparel_variant(b["title"])
+    if apparel_a or apparel_b:
+        if not sizes_a or not sizes_b or not colors_a or not colors_b:
+            return False, "apparel-variant-missing"
+        if sizes_a != sizes_b or colors_a != colors_b:
+            return False, "apparel-variant-conflict"
     ages_a, ages_b = extract_age_ranges(a["title"]), extract_age_ranges(b["title"])
     if ages_a and ages_b and ages_a.isdisjoint(ages_b):
         return False, "age-range-conflict"
@@ -250,6 +311,11 @@ def variant_evidence_compatible(a, b):
     packs_a, packs_b = extract_pack_counts(a["title"]), extract_pack_counts(b["title"])
     if packs_a and packs_b and packs_a.isdisjoint(packs_b):
         return False, "pack-count-conflict"
+
+    weights_a = extract_weight_grams(a["title"])
+    weights_b = extract_weight_grams(b["title"])
+    if weights_a and weights_b and weights_a.isdisjoint(weights_b):
+        return False, "weight-conflict"
 
     return True, None
 
@@ -267,7 +333,7 @@ def valid_gtin(value):
     for i, n in enumerate(reversed(body)):
         total += n * (3 if i % 2 == 0 else 1)
     expected = (10 - (total % 10)) % 10
-    return digits if expected == check else None
+    return digits.zfill(14) if expected == check and len(set(digits)) > 1 else None
 
 
 def jaccard(a, b):
@@ -291,6 +357,7 @@ def model_overlap(a, b):
     return 0.0
 
 
+@lru_cache(maxsize=32768)
 def extract_storage_gb(title):
     raw = normalize_text(title)
     values = set()
@@ -301,6 +368,7 @@ def extract_storage_gb(title):
     return values
 
 
+@lru_cache(maxsize=32768)
 def extract_ram_gb(title):
     raw = normalize_text(title)
     values = set()
@@ -317,6 +385,7 @@ def extract_ram_gb(title):
     return values
 
 
+@lru_cache(maxsize=32768)
 def extract_cpu_tokens(title):
     raw = normalize_text(title)
     patterns = [
@@ -327,6 +396,7 @@ def extract_cpu_tokens(title):
     return {re.sub(r"\s+", "", x) for p in patterns for x in re.findall(p, raw)}
 
 
+@lru_cache(maxsize=32768)
 def extract_screen_inches(title):
     raw = normalize_text(title)
     values = set()
@@ -340,6 +410,7 @@ def extract_screen_inches(title):
     return values
 
 
+@lru_cache(maxsize=32768)
 def extract_phone_family(title):
     norm = normalize_text(title)
     patterns = [
@@ -357,6 +428,7 @@ def extract_phone_family(title):
     return None
 
 
+@lru_cache(maxsize=32768)
 def generic_tech_family_keys(title):
     norm = normalize_text(title)
     keys = set()
@@ -379,6 +451,7 @@ def generic_tech_family_keys(title):
     return keys
 
 
+@lru_cache(maxsize=32768)
 def extract_critical_variant_suffixes(title):
     norm = normalize_text(title)
     tokens = set(norm.split())
@@ -387,6 +460,7 @@ def extract_critical_variant_suffixes(title):
     return tokens & {"pro", "plus", "max", "ultra", "mini", "lite", "gen", "ae", "ce"}
 
 
+@lru_cache(maxsize=32768)
 def tech_model_keys(title):
     keys = set(extract_model_tokens(title))
     norm = normalize_text(title)
@@ -412,9 +486,10 @@ def tech_model_keys(title):
     phrase = consumer_model_phrase(title)
     if phrase:
         keys.add("MODEL:" + phrase.upper())
-    return keys
+    return {k for k in keys if not re.fullmatch(r"(?:IP\d+[A-Z]?|BT\d+|USB\d+|SPF\d+|DDR\d+)", k)}
 
 
+@lru_cache(maxsize=32768)
 def consumer_model_phrase(title):
     norm = normalize_text(title)
     patterns = [
@@ -428,6 +503,7 @@ def consumer_model_phrase(title):
     return None
 
 
+@lru_cache(maxsize=32768)
 def technology_profile(title):
     norm = normalize_text(title)
     # normalize_text() removes Turkish diacritics but keeps dotless-i as "i".
@@ -499,25 +575,208 @@ def strict_technology_compatible(a, b):
     return True, None
 
 
+
+UNKNOWN_BRANDS = {"", "diger", "other", "generic", "genel", "markasiz", "unknown", "nobrand"}
+
+
+def prepare_rows(rows):
+    """Infer only missing brands from catalog-supported, unambiguous title prefixes.
+
+    Never overwrite an explicit brand or persist inferred metadata. Two distinct
+    merchants must independently supply the catalog brand. Compatibility text
+    ("Apple icin", "Samsung uyumlu") is not evidence of accessory ownership.
+    """
+    support = defaultdict(set)
+    names = {}
+    for row in rows:
+        brand = normalize_brand(row.get("brand"))
+        if brand not in UNKNOWN_BRANDS:
+            support[brand].add(row["merchant_id"])
+            names[brand] = row["brand"]
+    trusted = {b for b, stores in support.items() if len(stores) >= 2}
+    result = []
+    for row in rows:
+        copy = dict(row)
+        brand = normalize_brand(row.get("brand"))
+        if brand in UNKNOWN_BRANDS:
+            words = normalize_text(row.get("title")).split()
+            hits = [(n, "".join(words[:n])) for n in range(1, min(6, len(words)) + 1)
+                    if "".join(words[:n]) in trusted]
+            # Prefixes such as Philips / Philips Avent are intentionally ambiguous.
+            accessory = re.search(r"\b(?:icin|uyumlu|compatible|replacement|yedek|kilif|kilifi|case|cover|aksesuar|aksesuari)\b",
+                                  " ".join(words))
+            if len(hits) == 1 and not accessory:
+                copy["brand"] = names[hits[0][1]]
+                copy["brand_source"] = "catalog-title-prefix"
+            else:
+                copy["brand"] = None
+        result.append(copy)
+    return result
+
+
+@lru_cache(maxsize=32768)
+def title_identity(title, brand):
+    """Exact normalized identity, not fuzzy token overlap.
+
+    Preserve colors, flavors, quantities, model suffixes and all digits. Strip
+    only the store's boilerplate and a leading copy of the known brand; convert
+    equivalent explicit units without treating a bare decimal as a capacity.
+    """
+    raw = unicodedata.normalize("NFKD", (title or "").casefold())
+    raw = "".join(c for c in raw if not unicodedata.combining(c)).replace("ı", "i")
+    raw = re.sub(r"\s+fiyatlari ve ozellikleri\s*$", "", raw)
+    def quantity(match):
+        number = _decimal_to_float(match.group(1))
+        unit = match.group(2)
+        if unit in {"l", "lt", "litre", "liter"}:
+            number *= 1000
+            unit = "ml"
+        elif unit in {"kg", "kilogram"}:
+            number *= 1000
+            unit = "g"
+        elif unit in {"gr", "gram"}:
+            unit = "g"
+        return " quantity" + format(number, ".8g").replace(".", "decimal") + unit + " "
+    raw = re.sub(r"(?<![\w.,])(\d+(?:[.,]\d+)?|[.,]\d+)\s*(kilogram|litre|liter|gram|kg|ml|lt|gr|gb|tb|g|l)\b", quantity, raw)
+    # Keep decimal/generation distinctions and Plus model suffixes.
+    raw = re.sub(r"(?<=\d)[.,](?=\d)", "decimal", raw).replace("+", " plus ")
+    words = normalize_text(raw).split()
+    for n in range(1, min(6, len(words)) + 1):
+        if "".join(words[:n]) == normalize_brand(brand):
+            words = words[n:]
+            break
+    return tuple(words)
+
+
+def exact_identity(a, b):
+    left = title_identity(a["title"], a.get("brand"))
+    right = title_identity(b["title"], b.get("brand"))
+    distinctive = [w for w in left if w not in STOPWORDS and not w.startswith("quantity") and not w.isdigit()]
+    numeric_evidence = any(any(c.isdigit() for c in word) for word in left)
+    if re.search(r"\b(?:allik|ruj|fondoten|kapatici|sac boyasi|goz fari)\b", normalize_text(a["title"])):
+        # Cosmetics without an explicit shade code can describe many variants.
+        shade_words = [w for w in left if not w.startswith("quantity") and
+                       re.fullmatch(r"\d{1,4}(?:decimal\d+)?[a-z]?", w)]
+        if not shade_words:
+            return False
+    return left == right and numeric_evidence and len(left) >= 3 and len(set(distinctive)) >= 2
+
+
+def candidate_pairs(rows):
+    """Union of brand and validated GTIN blocks; never lose brandless GTINs."""
+    buckets = defaultdict(list)
+    for i, row in enumerate(rows):
+        brand = normalize_brand(row.get("brand"))
+        if brand not in UNKNOWN_BRANDS:
+            buckets[("brand", brand)].append(i)
+        gtin = valid_gtin(row.get("gtin"))
+        if gtin:
+            buckets[("gtin", gtin)].append(i)
+    seen = set()
+    for indexes in buckets.values():
+        for pos, i in enumerate(indexes):
+            for j in indexes[pos + 1:]:
+                if rows[i]["merchant_id"] == rows[j]["merchant_id"] or (i, j) in seen:
+                    continue
+                seen.add((i, j))
+                yield i, j
+
+
+
+@lru_cache(maxsize=32768)
+def drinkware_family(title, brand):
+    """Small explicit vocabulary; unknown Stanley titles get no family bonus."""
+    if normalize_brand(brand) != "stanley":
+        return None
+    norm = normalize_text(title)
+    if re.search(r"\b(?:aksesuar\w*|kilif\w*|yedek|koruyucu\w*|uyumlu|pipeti\w*|kapak\w*|set\w*|paket\w*|adet|food|yemek|spork|kase|bowl)\b", norm):
+        return None
+    words = set(norm.split())
+    # Keep distinct lid mechanisms and product families separate.
+    if "aerolight" in words and "transit" in words and not words.intersection({"fliptop", "iceflow", "flip", "straw"}):
+        return "aerolight-transit"
+    if "iceflow" in words and {"flip", "straw"} <= words and not words.intersection({"aerolight", "twist", "bottle"}):
+        if re.search(r"\b2[.,]0\b", (title or "").casefold()):
+            return "iceflow-flip-straw-2.0"
+        return "iceflow-flip-straw"
+    if words.intersection({"classic", "klasik"}) and words.intersection({"vakumlu", "vacuum"}):
+        if not words.intersection({"mug", "bardak", "kupa", "trigger", "action", "neverleak", "transit", "fliptop", "quencher", "master", "adventure"}):
+            return "classic-vacuum-bottle"
+    return None
+
+
+def drinkware_evidence(a, b):
+    fa = drinkware_family(a["title"], a.get("brand"))
+    fb = drinkware_family(b["title"], b.get("brand"))
+    if not fa or not fb or fa != fb:
+        return False
+    va, vb = extract_volume_ml(a["title"]), extract_volume_ml(b["title"])
+    return va is not None and vb is not None and va == vb
+
+
+def accessory_only(title):
+    return bool(re.search(r"\b(?:yedek|replacement|kilif\w*|aksesuar\w*|koruyucu\w*)\b", normalize_text(title)))
+
+
 def pair_score(a, b):
     if a["merchant_id"] == b["merchant_id"]:
         return 0.0, "same-merchant"
+
+    if accessory_only(a["title"]) != accessory_only(b["title"]):
+        return 0.0, "accessory-conflict"
+
+    # Bundles cannot be compared to the base product just because one model
+    # overlaps. Do not mistake 8+256 GB memory syntax for a bundle separator.
+    bundle_pattern = r"\b(?:hediyeli|hediye)\b|\s\+\s(?!\d+\s*(?:gb|tb)\b)"
+    bundle_a = bool(re.search(bundle_pattern, a["title"].casefold()))
+    bundle_b = bool(re.search(bundle_pattern, b["title"].casefold()))
+    if bundle_a != bundle_b:
+        return 0.0, "bundle-conflict"
 
     gtin_a = valid_gtin(a.get("gtin"))
     gtin_b = valid_gtin(b.get("gtin"))
     if gtin_a and gtin_b:
         if gtin_a == gtin_b:
+            ba, bb = normalize_brand(a.get("brand")), normalize_brand(b.get("brand"))
+            if ba not in UNKNOWN_BRANDS and bb not in UNKNOWN_BRANDS and ba != bb:
+                return 0.0, "gtin-brand-conflict"
+            va, vb = extract_volume_ml(a["title"]), extract_volume_ml(b["title"])
+            if va is not None and vb is not None and abs(va - vb) > VOLUME_TOLERANCE_ML:
+                return 0.0, "gtin-volume-conflict"
+            ok, reason = variant_evidence_compatible(a, b)
+            if not ok:
+                return 0.0, reason
+            ma, mb = extract_model_tokens(a["title"]), extract_model_tokens(b["title"])
+            if ma and mb and ma.isdisjoint(mb):
+                return 0.0, "gtin-model-conflict"
+            tech_ok, tech_reason = strict_technology_compatible(a, b)
+            if not tech_ok and tech_reason.endswith("conflict"):
+                return 0.0, "gtin-" + tech_reason
+            if technology_profile(a["title"]) and technology_profile(b["title"]):
+                sa, sb = extract_storage_gb(a["title"]), extract_storage_gb(b["title"])
+                if sa and sb and sa.isdisjoint(sb):
+                    return 0.0, "gtin-storage-conflict"
             return 100.0, "gtin"
         return 0.0, "gtin-conflict"
 
     brand_a = normalize_brand(a.get("brand"))
     brand_b = normalize_brand(b.get("brand"))
-    if not brand_a or not brand_b or brand_a != brand_b:
+    if brand_a in UNKNOWN_BRANDS or brand_b in UNKNOWN_BRANDS or brand_a != brand_b:
         return 0.0, "brand"
 
     tech_ok, tech_reason = strict_technology_compatible(a, b)
     if not tech_ok:
         return 0.0, tech_reason
+
+    if technology_profile(a["title"]):
+        ma, mb = extract_model_tokens(a["title"]), extract_model_tokens(b["title"])
+        semantic_a = {k for k in tech_model_keys(a["title"]) if k.startswith(("FAMILY:", "MODEL:", "PHONE:"))}
+        semantic_b = {k for k in tech_model_keys(b["title"]) if k.startswith(("FAMILY:", "MODEL:", "PHONE:"))}
+        if ma and mb and not (semantic_a & semantic_b):
+            if ma.isdisjoint(mb):
+                return 0.0, "tech-explicit-model-conflict"
+            if ma != mb:
+                return 0.0, "tech-extra-model-evidence"
 
     vol_a = extract_volume_ml(a["title"])
     vol_b = extract_volume_ml(b["title"])
@@ -538,6 +797,20 @@ def pair_score(a, b):
 
     models_a = extract_model_tokens(a["title"])
     models_b = extract_model_tokens(b["title"])
+    # Explicit bundle feature counts are critical variants (15in1 vs 16in1).
+    features_a = set(re.findall(r"\b(\d+)\s*in\s*1\b", a["title"].casefold()))
+    features_b = set(re.findall(r"\b(\d+)\s*in\s*1\b", b["title"].casefold()))
+    if features_a and features_b and features_a != features_b:
+        return 0.0, "bundle-feature-conflict"
+    family_a = drinkware_family(a["title"], a.get("brand"))
+    family_b = drinkware_family(b["title"], b.get("brand"))
+    if family_a and family_b and family_a != family_b:
+        return 0.0, "drinkware-family-conflict"
+    if drinkware_evidence(a, b):
+        return 90.0, "drinkware-family-capacity"
+
+    if exact_identity(a, b):
+        return 92.0, "exact-normalized-title"
 
     sim = title_similarity(a["title"], b["title"])
     model = model_overlap(a["title"], b["title"])
@@ -586,6 +859,8 @@ def load_rows():
         merchant = merchant_map.get(offer.get("merchant_id"))
         if not product or not merchant:
             continue
+        if product.get("active") is False or variant.get("active") is False:
+            continue
         rows.append({
             "offer_id": offer["id"],
             "variant_id": variant["id"],
@@ -601,44 +876,25 @@ def load_rows():
             "currency": offer.get("currency") or "TRY",
             "product_url": offer.get("product_url"),
         })
-    return rows
+    return prepare_rows(rows)
 
 
-def build_groups(rows):
-    # pair_score() can only accept pairs from different merchants with the same
-    # normalized brand. Bucket up front instead of evaluating every offer
-    # against every other offer in the database (O(n^2)).
-    brand_buckets = {}
-    for idx, row in enumerate(rows):
-        brand = normalize_brand(row.get("brand"))
-        if not brand:
-            continue
-        brand_buckets.setdefault(brand, []).append(idx)
-
+def build_groups(rows, min_score=None):
+    threshold = MIN_SCORE if min_score is None else max(MIN_SCORE, min_score)
+    rows = prepare_rows(rows)
     pair_cache = {}
     accepted_edges = []
-
-    for indexes in brand_buckets.values():
-        if len(indexes) < 2:
-            continue
-        merchants = {rows[i]["merchant_id"] for i in indexes}
-        if len(merchants) < 2:
-            continue
-
-        for pos, i in enumerate(indexes):
-            for j in indexes[pos + 1:]:
-                if rows[i]["merchant_id"] == rows[j]["merchant_id"]:
-                    continue
-                score, reason = pair_score(rows[i], rows[j])
-                pair_cache[(i, j)] = (score, reason)
-                if score >= MIN_SCORE:
-                    accepted_edges.append((score, reason, i, j))
+    for i, j in candidate_pairs(rows):
+        score, reason = pair_score(rows[i], rows[j])
+        pair_cache[(i, j)] = (score, reason)
+        if score >= threshold:
+            accepted_edges.append((score, reason, i, j))
 
     accepted_edges.sort(key=lambda x: -x[0])
 
     # Only rows participating in an accepted edge need group state.
     active_indexes = {i for _, _, i, j in accepted_edges for i in (i, j)}
-    groups = {i: {i} for i in active_indexes}
+    groups = {i: {i} for i in sorted(active_indexes)}
     group_of = {i: i for i in active_indexes}
 
     def cached_pair(i, j):
@@ -657,7 +913,7 @@ def build_groups(rows):
         if len(merchant_ids) != len(set(merchant_ids)):
             continue
 
-        if any(cached_pair(a, b)[0] < MIN_SCORE for a in left for b in right):
+        if any(cached_pair(a, b)[0] < threshold for a in left for b in right):
             continue
 
         merged = left | right
@@ -675,7 +931,7 @@ def build_groups(rows):
         for pos, i in enumerate(indexes):
             for j in indexes[pos + 1:]:
                 score, reason = cached_pair(i, j)
-                if score >= MIN_SCORE:
+                if score >= threshold:
                     edges.append((score, reason, i, j))
         if not edges:
             continue

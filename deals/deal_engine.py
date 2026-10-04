@@ -13,6 +13,9 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 DEAL_THRESHOLD_PERCENT = float(os.getenv("DEAL_THRESHOLD_PERCENT", "15"))
 HISTORY_DROP_THRESHOLD_PERCENT = float(os.getenv("HISTORY_DROP_THRESHOLD_PERCENT", "5"))
+MAX_AUTO_DEAL_GAP_PERCENT = float(os.getenv("MAX_AUTO_DEAL_GAP_PERCENT", "70"))
+MAX_AUTO_HISTORY_DROP_PERCENT = float(os.getenv("MAX_AUTO_HISTORY_DROP_PERCENT", "60"))
+REDISPATCH_PRICE_DROP_PERCENT = float(os.getenv("REDISPATCH_PRICE_DROP_PERCENT", "5"))
 
 
 def headers(extra=None):
@@ -104,6 +107,10 @@ def load_data():
     offers = sb_get("offers", offer_params)
     merchants = sb_get("merchants", {"select": "id,name,slug"})
     existing = sb_get("deal_candidates", {"select": "id,canonical_product_id,status"})
+    dispatches = sb_get(
+        "deal_approval_dispatches",
+        {"select": "deal_candidate_id,status,sent_at"},
+    )
 
     # Price history'yi REST tarafında tarih filtresine sokmuyoruz.
     # Bazı PostgREST tarih parametreleri HTTP 400 döndürebildiği için
@@ -122,7 +129,7 @@ def load_data():
         if checked_at and checked_at >= since_90d:
             history.append(row)
 
-    return canonical, matches, variants, offers, merchants, existing, history
+    return canonical, matches, variants, offers, merchants, existing, dispatches, history
 
 
 def build_offer_groups(canonical, matches, variants, offers):
@@ -252,11 +259,63 @@ def history_label(info):
     return f"ANLAMLI DÜŞÜŞ YOK (%{info['history_drop_percent']:.2f})"
 
 
+def sent_price_at(offers, history_map, sent_at):
+    """Reconstruct the lowest store price shown in the last admin dispatch."""
+    sent_time = parse_dt(sent_at)
+    if sent_time is None:
+        return None
+    prices = []
+    for offer in offers:
+        for point in history_map.get(offer["id"], []):
+            if point["checked_at"] <= sent_time:
+                prices.append(point["price"])
+                break
+    return min(prices) if prices else None
+
+
+def redispatch_drop_percent(current_price, sent_price):
+    return price_drop_percent(current_price, sent_price)
+
+
+def suspicious_price_reason(gap, history_info):
+    if gap + 1e-9 >= MAX_AUTO_DEAL_GAP_PERCENT:
+        return f"mağazalar arası fark %{gap:.2f}"
+    history_drop = float(history_info.get("history_drop_percent") or 0)
+    if history_drop + 1e-9 >= MAX_AUTO_HISTORY_DROP_PERCENT:
+        return f"geçmiş fiyata göre düşüş %{history_drop:.2f}"
+    return None
+
+
+def register_publication_scan(started_at):
+    if not started_at:
+        return None
+    parsed = parse_dt(started_at)
+    if parsed is None or parsed.tzinfo is None:
+        raise ValueError("Pipeline start timestamp invalid")
+    sb_upsert("publication_scan_batches", {"started_at": started_at}, "started_at")
+    return started_at
+
+
+def complete_publication_scan(started_at):
+    if not started_at:
+        return
+    req = Request(
+        f"{SUPABASE_URL}/rest/v1/rpc/complete_publication_scan",
+        data=json.dumps({"p_started_at": started_at}).encode(),
+        headers=headers(), method="POST",
+    )
+    with urlopen(req, timeout=45):
+        pass
+    print(f"PUBLICATION QUEUE | scan completed | {started_at}")
+
+
 def main():
-    canonical, matches, variants, offers, merchants, existing, history = load_data()
+    publication_scan_started_at = register_publication_scan(os.getenv("PIPELINE_STARTED_AT", "").strip())
+    canonical, matches, variants, offers, merchants, existing, dispatches, history = load_data()
     merchant_map = {m["id"]: (m.get("name") or m.get("slug") or m["id"]) for m in merchants}
     canonical_map = {c["id"]: c for c in canonical}
     existing_by_canonical = {x["canonical_product_id"]: x for x in existing}
+    dispatch_by_candidate = {x["deal_candidate_id"]: x for x in dispatches}
     grouped = build_offer_groups(canonical, matches, variants, offers)
     history_map = build_history_map(history)
 
@@ -266,8 +325,10 @@ def main():
     print(f"Canonical ürün: {len(canonical)}")
     print(f"Rakip fiyat eşiği: %{DEAL_THRESHOLD_PERCENT:.2f}")
     print(f"Geçmiş fiyat düşüş eşiği: %{HISTORY_DROP_THRESHOLD_PERCENT:.2f}")
+    print(f"Tekrar bildirim düşüş eşiği: %{REDISPATCH_PRICE_DROP_PERCENT:.2f}")
     print("Kural 1: en ucuz teklif, ikinci en ucuz farklı mağazadan en az %15 ucuzsa fırsat adayıdır.")
-    print("Kural 2: geçmiş fiyatında en az %5 düşüş görülürse fırsat doğrulanır.\n")
+    print("Kural 2: son Telegram fiyatından en az %5 daha ucuzsa yeniden fırsat adayıdır.")
+    print("Kural 3: geçmiş fiyatında en az %5 düşüş görülürse fırsat doğrulanır.\n")
 
     candidates = 0
     verified_count = 0
@@ -300,14 +361,38 @@ def main():
         cheapest_name = merchant_map.get(cheapest["merchant_id"], cheapest["merchant_id"])
         competitor_name = merchant_map.get(competitor["merchant_id"], competitor["merchant_id"])
 
-        if gap + 1e-9 >= DEAL_THRESHOLD_PERCENT:
+        existing_row = existing_by_canonical.get(cid)
+        dispatch = dispatch_by_candidate.get((existing_row or {}).get("id"))
+        last_sent_price = sent_price_at(
+            store_offers, history_map, (dispatch or {}).get("sent_at")
+        )
+        repeat_drop = redispatch_drop_percent(cheapest["price"], last_sent_price)
+        redispatch_due = bool(
+            dispatch
+            and dispatch.get("status") == "sent"
+            and repeat_drop + 1e-9 >= REDISPATCH_PRICE_DROP_PERCENT
+        )
+        qualifies_by_gap = gap + 1e-9 >= DEAL_THRESHOLD_PERCENT
+        redispatch_only = redispatch_due and not qualifies_by_gap
+
+        if qualifies_by_gap or redispatch_due:
             # Admin REDDET kalicidir; pipeline ayni urunu tekrar aday yapmamali.
-            existing_row = existing_by_canonical.get(cid)
             if existing_row and existing_row.get("status") == "rejected":
                 print(f"SKIP | {title} | admin tarafindan reddedildi; tekrar aday yapilmadi")
                 continue
 
             history_info = analyze_history(cheapest["id"], cheapest["price"], history_map)
+            suspicious_reason = suspicious_price_reason(gap, history_info)
+            if suspicious_reason:
+                print(f"ŞÜPHELİ FİYAT | {title} | {suspicious_reason}; aday oluşturulmadı")
+                if cid in existing_by_canonical:
+                    sb_patch(
+                        "deal_candidates",
+                        {"canonical_product_id": f"eq.{cid}"},
+                        {"status": "expired", "verified": False,
+                         "verified_at": None, "updated_at": now},
+                    )
+                continue
             verified_at = now if history_info["verified"] else None
             row = {
                 "canonical_product_id": cid,
@@ -318,6 +403,9 @@ def main():
                 "competitor_merchant_id": competitor["merchant_id"],
                 "competitor_price": round(competitor["price"], 2),
                 "gap_percent": round(gap, 2),
+                "notification_reason": "redispatch_price_drop" if redispatch_only else "competitor_gap",
+                "redispatch_drop_percent": round(repeat_drop, 2) if redispatch_only else 0,
+                "previous_notified_price": round(last_sent_price, 2) if redispatch_only else None,
                 "threshold_percent": DEAL_THRESHOLD_PERCENT,
                 "status": "candidate",
                 "updated_at": now,
@@ -326,11 +414,22 @@ def main():
             }
             if cid not in existing_by_canonical:
                 row["detected_at"] = now
+            row["scan_started_at"] = publication_scan_started_at
             sb_upsert("deal_candidates", row, "canonical_product_id")
+
+            if redispatch_due:
+                sb_patch(
+                    "deal_approval_dispatches",
+                    {"deal_candidate_id": f"eq.{existing_row['id']}"},
+                    {"status": "pending", "error_message": None, "updated_at": now},
+                )
 
             candidates += 1
             if history_info["verified"]:
                 verified_count += 1
+            if redispatch_due:
+                prefix = "YENİ FİYAT FIRSATI"
+            elif history_info["verified"]:
                 prefix = "DOĞRULANMIŞ FIRSAT"
             else:
                 prefix = "FIRSAT ADAYI"
@@ -339,6 +438,11 @@ def main():
             print(f"  {cheapest_name:<16} {cheapest['price']:>10.2f} TRY  <-- EN UCUZ")
             print(f"  {competitor_name:<16} {competitor['price']:>10.2f} TRY  <-- RAKİP")
             print(f"  Geçmiş kontrolü: {history_label(history_info)}")
+            if redispatch_due:
+                print(
+                    f"  Son Telegram fiyatı: {last_sent_price:.2f} TRY | "
+                    f"ek düşüş: %{repeat_drop:.2f}"
+                )
             if history_info["history_avg_30d"] is not None:
                 print(f"  30 gün ort.: {history_info['history_avg_30d']:.2f} TRY | 90 gün dip: {history_info['history_low_90d']:.2f} TRY")
         else:
@@ -358,6 +462,9 @@ def main():
                         "competitor_merchant_id": competitor["merchant_id"],
                         "competitor_price": round(competitor["price"], 2),
                         "gap_percent": round(gap, 2),
+                        "notification_reason": None,
+                        "redispatch_drop_percent": 0,
+                        "previous_notified_price": None,
                         "threshold_percent": DEAL_THRESHOLD_PERCENT,
                         "status": "expired",
                         "verified": False,
@@ -372,6 +479,8 @@ def main():
     print(f"Eşik altı: {not_candidates}")
     print(f"Yetersiz mağaza: {insufficient}")
     print("=" * 88)
+
+    complete_publication_scan(publication_scan_started_at)
 
 
 if __name__ == "__main__":

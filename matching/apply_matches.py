@@ -1,3 +1,5 @@
+import argparse
+from pathlib import Path
 import json
 import os
 from datetime import datetime, timezone
@@ -14,6 +16,9 @@ from product_matcher import (
     load_rows,
     normalize_text,
     valid_gtin,
+    pair_score,
+    prepare_rows,
+    sb_get,
 )
 
 AUTO_APPROVE_MIN = float(os.getenv("MATCH_AUTO_APPROVE_MIN", "88"))
@@ -134,82 +139,126 @@ def create_canonical(members):
     return rows[0]
 
 
-def apply_group(best_score, indexes, edges, rows):
+def plan_group(best_score, indexes, edges, rows, existing_rows):
+    """Pure planner shared by dry-run and writer; refuses weak group bridges."""
     members = [rows[i] for i in indexes]
-    existing = [existing_match(m["product_id"]) for m in members]
-    canonical_ids = {m["canonical_product_id"] for m in existing if m}
+    member_ids = {m["product_id"] for m in members}
+    edge_pairs = {tuple(sorted((i, j))) for _, _, i, j in edges}
+    required = {tuple(sorted((i, j))) for n, i in enumerate(indexes) for j in indexes[n + 1:]}
+    if len(members) < 2 or edge_pairs != required or any(s < AUTO_APPROVE_MIN for s, _, _, _ in edges):
+        return {"action": "review", "reason": "weak-or-incomplete-group"}
+    if len(member_ids) != len(members):
+        return {"action": "review", "reason": "multiple-variants-one-product"}
+    by_product = {}
+    for match in existing_rows:
+        by_product.setdefault(match["product_id"], []).append(match)
+    existing = [m for pid in member_ids for m in by_product.get(pid, [])]
+    if any(m.get("status") != "approved" for m in existing):
+        return {"action": "review", "reason": "existing-nonapproved-match"}
+    cids = {m["canonical_product_id"] for m in existing}
+    if len(cids) > 1:
+        return {"action": "review", "reason": "canonical-conflict"}
+    new_members = [m for m in members if m["product_id"] not in by_product]
+    if not new_members:
+        return {"action": "skip", "reason": "already-linked"}
+    canonical_id = next(iter(cids), None)
+    if canonical_id:
+        anchors = [m for m in existing_rows if m["canonical_product_id"] == canonical_id]
+        if any(m.get("status") != "approved" for m in anchors):
+            return {"action": "review", "reason": "canonical-has-nonapproved-members"}
+        rows_by_product = {}
+        for row in rows:
+            rows_by_product.setdefault(row["product_id"], []).append(row)
+        if any(m["product_id"] not in rows_by_product for m in anchors):
+            return {"action": "review", "reason": "canonical-member-outside-snapshot"}
+        for member in new_members:
+            for anchor in anchors:
+                for reference in rows_by_product[anchor["product_id"]]:
+                    # Same-store aliases still need identity compatibility.
+                    reference = {**reference, "merchant_id": "__canonical_reference__"}
+                    if pair_score(member, reference)[0] < AUTO_APPROVE_MIN:
+                        return {"action": "review", "reason": "canonical-member-incompatible"}
+    return {
+        "action": "attach" if canonical_id else "create",
+        "canonical_id": canonical_id,
+        "members": members,
+        "new_members": new_members,
+        "score": min(s for s, _, _, _ in edges),
+        "reason": ",".join(sorted({reason for _, reason, _, _ in edges})),
+    }
 
-    # If members point at different canonicals, merging automatically would be
-    # destructive. Leave the group untouched for manual reconciliation.
-    if len(canonical_ids) > 1:
-        print("CONFLICT: Grup birden fazla mevcut canonical ürüne bağlı; otomatik birleştirme yapılmadı.")
-        return False
 
-    if canonical_ids:
-        canonical = {"id": next(iter(canonical_ids))}
-        new_members = [m for m, match in zip(members, existing) if not match]
-        if not new_members:
-            print("SKIP: Grubun tüm ürünleri zaten aynı canonical ürüne bağlı.")
-            return False
-        action = "ATTACHED"
-    else:
-        canonical = create_canonical(members)
-        new_members = members
-        action = "APPROVED"
-
-    reasons = sorted({reason for _, reason, _, _ in edges}) or ["heuristic"]
-    reason_text = ",".join(reasons)
+def execute_plan(plan):
+    canonical = {"id": plan["canonical_id"]} if plan["canonical_id"] else create_canonical(plan["members"])
     now = datetime.now(timezone.utc).isoformat()
+    written = []
+    for member in plan["new_members"]:
+        payload = {
+            "canonical_product_id": canonical["id"],
+            "product_id": member["product_id"],
+            "match_score": round(plan["score"], 2),
+            "match_reason": plan["reason"],
+            "status": "approved",
+            "updated_at": now,
+        }
+        sb("POST", "product_matches", body=payload, prefer="return=minimal")
+        written.append(payload)
+    return written
 
-    for member in new_members:
-        sb(
-            "POST",
-            "product_matches",
-            body={
-                "canonical_product_id": canonical["id"],
-                "product_id": member["product_id"],
-                "match_score": round(best_score, 2),
-                "match_reason": reason_text,
-                "status": "approved",
-                "updated_at": now,
-            },
-            prefer="return=minimal",
-        )
 
-    if action == "ATTACHED":
-        print(f"ATTACHED: mevcut canonical'a {len(new_members)} yeni mağaza ürünü eklendi | score={best_score:.1f}")
-    else:
-        print(f"APPROVED: {canonical['title']} | {len(members)} mağaza ürünü | score={best_score:.1f}")
-    for member in sorted(new_members, key=lambda x: (x["price"], x["merchant"])):
-        print(f"  {member['merchant']:<14} {member['price']:>10.2f} {member['currency']} | {member['title']}")
+def apply_group(best_score, indexes, edges, rows, existing_rows=None):
+    if existing_rows is None:
+        existing_rows = sb_get("product_matches", {"select": "product_id,canonical_product_id,status", "order": "id"})
+    plan = plan_group(best_score, indexes, edges, rows, existing_rows)
+    if plan["action"] not in {"create", "attach"}:
+        print(f"{plan['action'].upper()}: {plan['reason']}")
+        return False
+    written = execute_plan(plan)
+    existing_rows.extend(written)
+    print(f"{plan['action'].upper()}: {len(written)} product | score={plan['score']:.1f}")
     return True
 
 
 def main():
-    rows = load_rows()
-    groups = build_groups(rows)
-
-    print("=" * 88)
-    print("CANONICAL MATCH WRITER")
-    print("=" * 88)
-    print(f"Aktif offer: {len(rows)}")
-    print(f"Matcher grubu: {len(groups)}")
-    print(f"Otomatik onay eşiği: {AUTO_APPROVE_MIN:.1f}")
-    print("Sadece eşik üstündeki gruplar canonical_products/product_matches tablolarına yazılır.\n")
-
-    applied = 0
-    skipped_low = 0
-    for best_score, indexes, edges in groups:
-        if best_score < AUTO_APPROVE_MIN:
-            skipped_low += 1
+    parser = argparse.ArgumentParser(description="Canonical match writer with read-only/offline planning")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--input", type=Path, help="Offline JSON containing rows and matches; requires --dry-run")
+    parser.add_argument("--report", type=Path)
+    args = parser.parse_args()
+    if args.input and not args.dry_run:
+        parser.error("--input requires --dry-run")
+    if args.input:
+        data = json.loads(args.input.read_text(encoding="utf-8"))
+        rows, existing = prepare_rows(data["rows"]), list(data["matches"])
+    else:
+        rows = load_rows()
+        existing = sb_get("product_matches", {"select": "product_id,canonical_product_id,status", "order": "id"})
+    # Build at the actual approval threshold. Weak edges must neither inflate a
+    # group via its best score nor consume members of otherwise valid groups.
+    groups = build_groups(rows, min_score=AUTO_APPROVE_MIN)
+    summary = {"mode": "dry-run" if args.dry_run else "write", "rows": len(rows),
+               "approval_threshold": AUTO_APPROVE_MIN, "groups": len(groups),
+               "new_canonicals": 0, "attached_groups": 0, "new_product_matches": 0,
+               "decisions": []}
+    for number, (score, indexes, edges) in enumerate(groups):
+        plan = plan_group(score, indexes, edges, rows, existing)
+        summary["decisions"].append({"action": plan["action"], "reason": plan["reason"],
+                                     "product_ids": [rows[i]["product_id"] for i in indexes]})
+        if plan["action"] not in {"create", "attach"}:
             continue
-        if apply_group(best_score, indexes, edges, rows):
-            applied += 1
-
-    print("\n" + "=" * 88)
-    print(f"Yeni canonical grup: {applied}")
-    print(f"Eşik altı grup: {skipped_low}")
-    print("=" * 88)
+        if args.dry_run:
+            cid = plan["canonical_id"] or f"dry-run:{number}"
+            written = [{"product_id": m["product_id"], "canonical_product_id": cid, "status": "approved"}
+                       for m in plan["new_members"]]
+        else:
+            written = execute_plan(plan)
+        existing.extend(written)
+        summary["new_canonicals"] += plan["action"] == "create"
+        summary["attached_groups"] += plan["action"] == "attach"
+        summary["new_product_matches"] += len(written)
+    if args.report:
+        args.report.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps({k: v for k, v in summary.items() if k != "decisions"}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
