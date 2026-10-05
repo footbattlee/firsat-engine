@@ -20,3 +20,4 @@ htmlcov/
 reports/*_competitor_search.json
 reports/cloud_queue_render_test.png
 reports/category_search_matrix.md
+reports/cloud_render_validation/

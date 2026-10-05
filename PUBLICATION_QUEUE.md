@@ -12,7 +12,7 @@ Kuyruk tablolarında RLS açıktır; anonim ve normal kullanıcı erişimi yoktu
 
 Kontrol: public.publication_queue.state, last_error ve public.publication_slots. Durdurma: publication_queue_settings.enabled=false. Cron adı instagram-publication-half-hour. Kaynak SQL supabase/cloud_publication_queue.sql ve zamanlayıcı SQL supabase/schedule_publication_queue.sql dosyalarındadır.
 
-Yayın yapmayan test: publication-queue endpointine servis yetkisiyle POST {"dry_run":true}. Görsel testi POST {"mode":"render-test"}. Bu testler gerçek gönderi oluşturmaz. Node testleri: node --test tests/cloud_queue.test.ts.
+Yayın yapmayan test: publication-queue endpointine servis yetkisiyle POST {"dry_run":true}. Görsel testi POST {"mode":"render-test","candidate_id":"<aday UUID>"} (story için story=true). Bu testler gerçek gönderi oluşturmaz. Node testleri: node --test tests/cloud_queue.test.ts.
 
 Fırsat keşfinde DEAL_COMPETITOR_WORKERS varsayılan 3 ve en fazla 3'tür. Aynı mağazadaki ürünler sırayla aranır; farklı mağazalar paralel aranır. Normal kategori taramasının COLLECTOR_WORKERS=3 ayarı korunur.
 
@@ -25,3 +25,7 @@ Tarama ayrımı ve başlangıç engelinin SQL'i supabase/publication_queue_scan_
 ## Yayın kontrolü tercihi
 
 Kullanıcı 5 Ekim başlangıcı için, yayın öncesi canlı mağaza fiyat/stok erişiminin kaldırılmasını açıkça onayladı. Yayın verisi tamamlanan taramanın deal_candidates fiyat snapshot'ından alınır; mağaza sitesi yayın anında çağrılmaz. Ürün eşleşmesi, iki farklı mağaza, fiyat matematiği ve avantaj eşiği DB kayıtları üzerinden kontrol edilir. Görsel indirme ve Instagram API erişimi yayının teknik gereğidir ve devam eder. Gönderi açıklaması fiyatın son taramaya ait olduğunu ve fiyat/stokun değişebileceğini belirtir. connection-test, yalnızca elle tanı amacıyla kullanılabilir; otomatik yayın akışında değildir.
+
+## Product images and discount emphasis
+
+The cloud worker requests JPEG/PNG from known merchant CDNs and removes Hepsiburada explicit WebP transformations. Actual file signatures are checked; WebP/HTML/corrupt or blank product images stop preparation before Instagram reservation. A transparent 64x64 renderer probe verifies visible product pixels. The post and story use static regular/bold Noto Sans fonts and a large orange discount badge at the lower right, with Turkish decimal formatting. Authenticated render-test previews a real eligible candidate without storage, queue or publication writes.

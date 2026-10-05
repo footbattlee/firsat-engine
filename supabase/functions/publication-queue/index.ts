@@ -3,6 +3,7 @@ import {createClient} from 'npm:@supabase/supabase-js@2.57.4';
 import {parseHTML} from 'npm:linkedom@0.18.12';
 import {allowedUrl,samePath,products,verifiedOffer,validateGap,slotKey} from './core.ts';
 import {artwork} from './artwork.ts';
+import {fetchProductImage} from './image.ts';
 const env=(n:string)=>Deno.env.get(n)?.trim()||'';
 const service=env('SUPABASE_SERVICE_ROLE_KEY')||(()=>{try{return JSON.parse(env('SUPABASE_SECRET_KEYS')).default||'';}catch{return '';}})();
 const url=env('SUPABASE_URL'),sb=createClient(url,service);
@@ -60,16 +61,7 @@ async function candidate(id:string){
          cheapest_price:price,competitor_price:competitor,gap_percent:gap,image_url:cheap.image_url,price_checked_at:batch.completed_at};
 }
 function tracked(d:any){return url+'/functions/v1/deal-click?'+new URLSearchParams({deal:d.id,offer:d.offer_id,channel:'story'});}
-async function image(d:any){
- const u=new URL(d.image_url),host=u.hostname;
- const allowed=['dsmcdn.com','hepsiburada.net','media-amazon.com','ssl-images-amazon.com','n11scdn.akamaized.net','n11.com','vatanbilgisayar.com','mediamarkt.com.tr','mmst.eu','mmsrg.com'];
- if(u.protocol!=='https:'||!allowed.some(h=>host===h||host.endsWith('.'+h)))throw Error('image-domain-unverified');
- const r=await fetch(u,{headers,signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error('image-unavailable');
- const bytes=new Uint8Array(await r.arrayBuffer());if(bytes.length>8*1024*1024)throw Error('image-too-large');
- const type=(r.headers.get('content-type')||'').split(';')[0];
- if(!['image/jpeg','image/png','image/webp'].includes(type))throw Error('image-format-unverified');
- return {bytes,type};
-}
+async function image(d:any){return fetchProductImage(d.image_url);}
 async function prepare(d:any,slot:string){
  const photo=await image(d);const post=await artwork(d,photo.bytes,photo.type),story=await artwork(d,photo.bytes,photo.type,true);
  const tag=slot.replace(/[^\d]/g,'');const base=`deals/${d.id}/queue-${tag}`;
@@ -169,9 +161,10 @@ Deno.serve(async(req)=>{
    return Response.json({connection_test:true,results,published:0});
   }
   if(body.mode==='render-test'){
-   const bytes=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAN0lEQVR4nO3RwQ0AMAjDwJT9d05HMB9+vgGCZF7bXJrT9XhgwR8gEyETIRMhEyETIRMhEyEThXzH8QM9OMM6fAAAAABJRU5ErkJggg=='),c=>c.charCodeAt(0));
-   const png=await artwork({title:'Güncel fiyat kontrolü — Türkçe görsel testi',merchant:'Mağaza',cheapest_price:1234.56,competitor_price:1599.99,gap_percent:22.84},bytes,'image/png');
-   return new Response(png,{headers:{'Content-Type':'image/png'}});
+   if(!body.candidate_id)return Response.json({error:'candidate_id-required'},{status:400});
+   const d=await candidate(String(body.candidate_id)),photo=await image(d);
+   const png=await artwork(d,photo.bytes,photo.type,body.story===true);
+   return new Response(png,{headers:{'Content-Type':'image/png','Cache-Control':'no-store'}});
   }
   if(body.dry_run){
    let query=sb.from('publication_queue').select('candidate_id').eq('state','queued').order('enqueued_at').limit(3);

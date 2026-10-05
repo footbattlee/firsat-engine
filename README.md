@@ -79,7 +79,7 @@ Cloud helper tests require a Node version supporting native TypeScript (for
 example the Node 24 runtime used for validation):
 
 ```powershell
-node --test tests/cloud_queue.test.ts
+node --test tests/cloud_queue.test.ts tests/cloud_images.test.ts
 ```
 
 Credentials, virtual environments, generated creatives, scan logs and generated
