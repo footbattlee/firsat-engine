@@ -15,7 +15,7 @@ DEAL_THRESHOLD_PERCENT = float(os.getenv("DEAL_THRESHOLD_PERCENT", "15"))
 HISTORY_DROP_THRESHOLD_PERCENT = float(os.getenv("HISTORY_DROP_THRESHOLD_PERCENT", "5"))
 MAX_AUTO_DEAL_GAP_PERCENT = float(os.getenv("MAX_AUTO_DEAL_GAP_PERCENT", "70"))
 MAX_AUTO_HISTORY_DROP_PERCENT = float(os.getenv("MAX_AUTO_HISTORY_DROP_PERCENT", "60"))
-REDISPATCH_PRICE_DROP_PERCENT = float(os.getenv("REDISPATCH_PRICE_DROP_PERCENT", "5"))
+REDISPATCH_PRICE_DROP_PERCENT = max(15.0, float(os.getenv("REDISPATCH_PRICE_DROP_PERCENT", "15")))
 
 
 def headers(extra=None):
@@ -109,7 +109,7 @@ def load_data():
     existing = sb_get("deal_candidates", {"select": "id,canonical_product_id,status"})
     dispatches = sb_get(
         "deal_approval_dispatches",
-        {"select": "deal_candidate_id,status,sent_at"},
+        {"select": "deal_candidate_id,status,sent_at,notified_price"},
     )
 
     # Price history'yi REST tarafında tarih filtresine sokmuyoruz.
@@ -273,6 +273,23 @@ def sent_price_at(offers, history_map, sent_at):
     return min(prices) if prices else None
 
 
+def last_notification_price(dispatch, offers, history_map):
+    """Prefer the actual sent card price; history is only a legacy fallback."""
+    dispatch = dispatch or {}
+    if dispatch.get("notified_price") is not None:
+        return float(dispatch["notified_price"])
+    return sent_price_at(offers, history_map, dispatch.get("sent_at"))
+
+
+def redispatch_metadata(due, previous_price, drop):
+    # Redispatch takes precedence even when the cross-store gap also qualifies.
+    return {
+        "notification_reason": "redispatch_price_drop" if due else "competitor_gap",
+        "redispatch_drop_percent": round(drop, 2) if due else 0,
+        "previous_notified_price": round(previous_price, 2) if due else None,
+    }
+
+
 def redispatch_drop_percent(current_price, sent_price):
     return price_drop_percent(current_price, sent_price)
 
@@ -327,7 +344,7 @@ def main():
     print(f"Geçmiş fiyat düşüş eşiği: %{HISTORY_DROP_THRESHOLD_PERCENT:.2f}")
     print(f"Tekrar bildirim düşüş eşiği: %{REDISPATCH_PRICE_DROP_PERCENT:.2f}")
     print("Kural 1: en ucuz teklif, ikinci en ucuz farklı mağazadan en az %15 ucuzsa fırsat adayıdır.")
-    print("Kural 2: son Telegram fiyatından en az %5 daha ucuzsa yeniden fırsat adayıdır.")
+    print("Kural 2: son Telegram fiyatından en az %15 daha ucuzsa yeniden fırsat adayıdır.")
     print("Kural 3: geçmiş fiyatında en az %5 düşüş görülürse fırsat doğrulanır.\n")
 
     candidates = 0
@@ -363,9 +380,7 @@ def main():
 
         existing_row = existing_by_canonical.get(cid)
         dispatch = dispatch_by_candidate.get((existing_row or {}).get("id"))
-        last_sent_price = sent_price_at(
-            store_offers, history_map, (dispatch or {}).get("sent_at")
-        )
+        last_sent_price = last_notification_price(dispatch, store_offers, history_map)
         repeat_drop = redispatch_drop_percent(cheapest["price"], last_sent_price)
         redispatch_due = bool(
             dispatch
@@ -373,7 +388,6 @@ def main():
             and repeat_drop + 1e-9 >= REDISPATCH_PRICE_DROP_PERCENT
         )
         qualifies_by_gap = gap + 1e-9 >= DEAL_THRESHOLD_PERCENT
-        redispatch_only = redispatch_due and not qualifies_by_gap
 
         if qualifies_by_gap or redispatch_due:
             # Admin REDDET kalicidir; pipeline ayni urunu tekrar aday yapmamali.
@@ -403,9 +417,7 @@ def main():
                 "competitor_merchant_id": competitor["merchant_id"],
                 "competitor_price": round(competitor["price"], 2),
                 "gap_percent": round(gap, 2),
-                "notification_reason": "redispatch_price_drop" if redispatch_only else "competitor_gap",
-                "redispatch_drop_percent": round(repeat_drop, 2) if redispatch_only else 0,
-                "previous_notified_price": round(last_sent_price, 2) if redispatch_only else None,
+                **redispatch_metadata(redispatch_due, last_sent_price, repeat_drop),
                 "threshold_percent": DEAL_THRESHOLD_PERCENT,
                 "status": "candidate",
                 "updated_at": now,

@@ -35,3 +35,11 @@ test('discount is emphasized in Turkish notation on post and story without overl
  assert.ok(post.includes('Product &lt;script&gt;'));assert.ok(!post.includes('<script>'));
  for(const v of [0,NaN,Infinity,100])assert.throws(()=>discountLabel(v));
 });
+
+test('repeat artwork emphasizes actual old-price drop even when competitor gap also qualifies',()=>{
+ const svg=artworkSvg({title:'Termos',merchant:'Store',cheapest_price:2199,competitor_price:2799,
+  gap_percent:21.44,notification_reason:'redispatch_price_drop',previous_notified_price:2699},'data:image/png;base64,test');
+ assert.ok(svg.includes('%18,53'));assert.ok(!svg.includes('%21,44'));
+ assert.ok(svg.includes('2.699 TL'));assert.ok(!svg.includes('2.799 TL'));
+ assert.ok(svg.includes('SON PAYLA\u015eIMA G\u00d6RE'));
+});

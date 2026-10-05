@@ -146,7 +146,7 @@ def validate_candidate(data, gap_tolerance=0.35):
 
             reason = str(data.get("notification_reason") or "")
             threshold = float(os.getenv("DEAL_THRESHOLD_PERCENT", "15"))
-            redispatch_threshold = float(os.getenv("REDISPATCH_PRICE_DROP_PERCENT", "5"))
+            redispatch_threshold = max(15.0, float(os.getenv("REDISPATCH_PRICE_DROP_PERCENT", "15")))
             if reason == "redispatch_price_drop":
                 redispatch_drop = float(data.get("redispatch_drop_percent") or 0)
                 previous_price = float(data.get("previous_notified_price") or 0)
@@ -154,6 +154,12 @@ def validate_candidate(data, gap_tolerance=0.35):
                     errors.append(f"REDISPATCH_DROP_BELOW_THRESHOLD: drop={redispatch_drop:.2f}")
                 if previous_price <= cheapest:
                     errors.append("REDISPATCH_PREVIOUS_PRICE_INVALID")
+                else:
+                    actual_drop = (previous_price - cheapest) / previous_price * 100
+                    if actual_drop + 1e-9 < redispatch_threshold:
+                        errors.append(f"REDISPATCH_DROP_BELOW_THRESHOLD: calculated={actual_drop:.2f}")
+                    if abs(actual_drop - redispatch_drop) > 0.02:
+                        errors.append("REDISPATCH_DROP_MISMATCH")
             elif stored_gap + 1e-9 < threshold:
                 errors.append(f"DEAL_GAP_BELOW_THRESHOLD: gap={stored_gap:.2f}")
     except (TypeError, ValueError):

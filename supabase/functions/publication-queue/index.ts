@@ -1,7 +1,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import {createClient} from 'npm:@supabase/supabase-js@2.57.4';
 import {parseHTML} from 'npm:linkedom@0.18.12';
-import {allowedUrl,samePath,products,verifiedOffer,validateGap,slotKey} from './core.ts';
+import {allowedUrl,samePath,products,verifiedOffer,validateGap,slotKey,discountPresentation} from './core.ts';
 import {artwork} from './artwork.ts';
 import {fetchProductImage} from './image.ts';
 const env=(n:string)=>Deno.env.get(n)?.trim()||'';
@@ -38,6 +38,8 @@ async function detail(o:any,slug:string){
 }
 async function candidate(id:string){
  const d=await checked(await sb.from('deal_candidates').select('*').eq('id',id).eq('status','candidate').single());
+ const queued=await checked(await sb.from('publication_queue').select('notification_context').eq('candidate_id',id).maybeSingle());
+ if(queued?.notification_context)Object.assign(d,queued.notification_context);
  const settings=await checked(await sb.from('publication_queue_settings').select('source_after').eq('id',true).single());
  if(!d.scan_started_at||new Date(d.scan_started_at)<new Date(settings.source_after||0))throw Error('excluded-previous-scan');
  const batch=await checked(await sb.from('publication_scan_batches').select('completed_at').eq('started_at',d.scan_started_at).single());
@@ -58,7 +60,7 @@ async function candidate(id:string){
  if(!cp.title||!cheap.image_url)throw Error('creative-data-missing');
  const current=await checked(await sb.from('deal_candidates').select('status').eq('id',id).single());if(current.status!=='candidate')throw Error('candidate-rejected');
  return {id,offer_id:cheap.id,title:cp.title,merchant:merchants.find((m:any)=>m.id===cheap.merchant_id).name,
-         cheapest_price:price,competitor_price:competitor,gap_percent:gap,image_url:cheap.image_url,price_checked_at:batch.completed_at};
+         cheapest_price:price,competitor_price:competitor,gap_percent:gap,notification_reason:d.notification_reason,previous_notified_price:d.previous_notified_price,redispatch_drop_percent:d.redispatch_drop_percent,image_url:cheap.image_url,price_checked_at:batch.completed_at};
 }
 function tracked(d:any){return url+'/functions/v1/deal-click?'+new URLSearchParams({deal:d.id,offer:d.offer_id,channel:'story'});}
 async function image(d:any){return fetchProductImage(d.image_url);}
@@ -72,7 +74,9 @@ async function prepare(d:any,slot:string){
 }
 const money=(v:any)=>new Intl.NumberFormat('tr-TR',{maximumFractionDigits:2}).format(v)+' TL';
 async function instagram(d:any){
- const caption=`🔥 FİYATZADE FIRSATI\n\n${d.title}\n\n🛒 ${d.merchant}\n💸 Rakip fiyat: ${money(d.competitor_price)}\n🔥 Fırsat fiyatı: ${money(d.cheapest_price)}\n📉 Rakipten %${d.gap_percent} daha ucuz\n\n🔗 Fırsata git: ${url}/functions/v1/deal-click?${new URLSearchParams({deal:d.id,offer:d.offer_id,channel:'instagram'})}\n\nFiyat bilgisi son taramaya aittir; fiyat ve stok değişebilir.\n#işbirliği #reklam #indirim #fırsat`;
+ const discount=discountPresentation(d);
+ const percent=new Intl.NumberFormat('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2}).format(discount.percent);
+ const caption=`🔥 FİYATZADE FIRSATI\n\n${d.title}\n\n🛒 ${d.merchant}\n💸 ${discount.repeat?'Önceki paylaşım fiyatı':'Rakip fiyat'}: ${money(discount.comparisonPrice)}\n🔥 Fırsat fiyatı: ${money(d.cheapest_price)}\n📉 ${discount.repeat?'Son paylaşımdan sonra %'+percent+' düştü':'Rakipten %'+percent+' daha ucuz'}\n\n🔗 Fırsata git: ${url}/functions/v1/deal-click?${new URLSearchParams({deal:d.id,offer:d.offer_id,channel:'instagram'})}\n\nFiyat bilgisi son taramaya aittir; fiyat ve stok değişebilir.\n#işbirliği #reklam #indirim #fırsat`;
  async function graph(path:string,body?:URLSearchParams){
   const r=await fetch(igBase+'/'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+igToken,...(body?{'Content-Type':'application/x-www-form-urlencoded'}:{})},body,signal:AbortSignal.timeout(20000)});
   const j=await r.json();if(!r.ok)throw Error('instagram-api-failed');return j;

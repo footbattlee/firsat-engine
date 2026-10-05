@@ -299,7 +299,7 @@ def caption(data, validation):
         gap = f"{float(data['gap_percent']):.2f}".replace(".", ",")
         detail = f"\n🏪 Rakip mağaza farkı: %{gap}"
     return (
-        "🟠 <b>YENİ FIRSAT</b>\n\n"
+        ("🟠 <b>YENİ FİYAT FIRSATI</b>\n\n" if is_redispatch(data) else "🟠 <b>YENİ FIRSAT</b>\n\n") +
         f"<b>{html.escape(str(data['title']))}</b>\n\n"
         f"🏷 Marka: {html.escape(str(data.get('brand') or '-'))}\n"
         f"🛒 Mağaza: {html.escape(str(data['merchant']))}\n"
@@ -467,7 +467,7 @@ def dispatch_pending_candidates(limit=50):
                 "deal_approval_dispatches",
                 {"deal_candidate_id": f"eq.{candidate_id}"},
                 {"status": "sent", "telegram_message_id": message_id, "error_message": None,
-                 "sent_at": now, "updated_at": now},
+                 "sent_at": now, "notified_price": float(data["cheapest_price"]), "updated_at": now},
             )
             sent += 1
         except Exception as exc:

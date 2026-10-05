@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {slotKey,allowedUrl,samePath,products,verifiedOffer,validateGap,xml} from '../supabase/functions/publication-queue/core.ts';
+import {slotKey,allowedUrl,samePath,products,verifiedOffer,validateGap,xml,discountPresentation} from '../supabase/functions/publication-queue/core.ts';
 test('Istanbul window, half hour slots and no catch-up',()=>{
  for(const s of ['2026-10-04T06:59:00Z','2026-10-04T21:00:00Z','2026-10-04T07:05:00Z','2026-10-04T07:29:00Z'])assert.equal(slotKey(new Date(s)),null);
  for(const s of ['2026-10-04T07:00:00Z','2026-10-04T20:30:00Z'])assert.equal(slotKey(new Date(s)),s.replace('Z','.000Z'));
@@ -37,4 +37,13 @@ test('automatic publication uses completed scan snapshot and never calls storefr
  assert.ok(candidateBody.includes('scan-not-complete'));
  assert.ok(!candidateBody.includes('await detail('));
  assert.ok(!candidateBody.includes('fetch('));
+});
+
+test('repeat discount uses previous sent price and a strict fifteen percent floor',()=>{
+ const d={cheapest_price:850,competitor_price:1200,notification_reason:'redispatch_price_drop',previous_notified_price:1000,redispatch_drop_percent:29.17};
+ const view=discountPresentation(d);
+ assert.equal(view.percent,15);assert.equal(view.comparisonPrice,1000);assert.equal(view.repeat,true);
+ assert.equal(validateGap(850,1200,d),29.17);
+ for(const price of [851,950,1000,1100])assert.throws(()=>discountPresentation({...d,cheapest_price:price}));
+ assert.throws(()=>discountPresentation({...d,previous_notified_price:null}));
 });

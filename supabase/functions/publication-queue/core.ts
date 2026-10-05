@@ -33,7 +33,11 @@ export function verifiedOffer(nodes:any[],slug:string){
 export function validateGap(price:number,competitor:number,candidate:any){
  if(!Number.isFinite(price)||!Number.isFinite(competitor)||price<=0||competitor<=price)throw Error('price-order-invalid');
  const gap=(competitor-price)/competitor*100;
- if(gap<Number(candidate.threshold_percent||15)||gap>=70||Number(candidate.history_drop_percent||0)>=60)throw Error('advantage-lost-or-suspicious');
+ if(gap>=70||Number(candidate.history_drop_percent||0)>=60)throw Error('advantage-lost-or-suspicious');
+ if(candidate.notification_reason==='redispatch_price_drop'){
+  const previous=Number(candidate.previous_notified_price),drop=(previous-price)/previous*100;
+  if(!Number.isFinite(previous)||previous<=price||drop+1e-9<15||drop>=60)throw Error('redispatch-drop-below-threshold-or-suspicious');
+ }else if(gap<Number(candidate.threshold_percent||15))throw Error('advantage-lost-or-suspicious');
  return Math.round(gap*100)/100;
 }
 export function slotKey(now:Date){
@@ -46,4 +50,13 @@ export function wrap(text:string,max=40,lines=3){
  const result:string[]=[];let line='';
  for(const word of text.split(/\s+/)){if((line+' '+word).trim().length>max&&line){result.push(line);line=word;}else line=(line+' '+word).trim();}
  if(line)result.push(line);if(result.length>lines){result.length=lines;result[lines-1]=result[lines-1].slice(0,max-3)+'...';}return result;
+}
+export function discountPresentation(d:any){
+ const gap=validateGap(Number(d.cheapest_price),Number(d.competitor_price),d);
+ if(d.notification_reason==='redispatch_price_drop'){
+  const previous=Number(d.previous_notified_price);
+  return {percent:Math.round((previous-Number(d.cheapest_price))/previous*10000)/100,
+   comparisonPrice:previous,comparisonLabel:'ÖNCEKİ PAYLAŞIM',badgeTop:'SON PAYLAŞIMA GÖRE',badgeBottom:'FİYAT DÜŞTÜ',repeat:true};
+ }
+ return {percent:gap,comparisonPrice:Number(d.competitor_price),comparisonLabel:'RAKİP FİYAT',badgeTop:'RAKİPTEN',badgeBottom:'DAHA UCUZ',repeat:false};
 }

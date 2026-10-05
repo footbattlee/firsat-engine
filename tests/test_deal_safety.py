@@ -70,7 +70,7 @@ def test_sent_price_reconstructed_from_dispatch_time():
 def test_redispatch_uses_last_sent_price():
     drop = deal_engine.redispatch_drop_percent(15999, 17549)
     assert round(drop, 2) == 8.83
-    assert drop >= deal_engine.REDISPATCH_PRICE_DROP_PERCENT
+    assert drop < deal_engine.REDISPATCH_PRICE_DROP_PERCENT
 
 
 def test_creative_gate_blocks_low_gap_without_redispatch(monkeypatch):
@@ -136,3 +136,53 @@ def test_redispatch_caption_shows_telegram_drop_not_tiny_store_gap():
     assert "Son paylaşımdan sonra %24,00 düştü" in text
     assert "Rakip mağaza farkı: %0,03" in text
     assert "%0,03 daha ucuz" not in text
+
+def test_saved_notification_price_wins_over_history_reconstruction():
+    assert deal_engine.last_notification_price(
+        {"notified_price": 1000, "sent_at": "2026-10-04T12:00:00Z"}, [], {}
+    ) == 1000
+
+
+def test_repeat_metadata_takes_priority_over_qualifying_competitor_gap():
+    data = deal_engine.redispatch_metadata(True, 2699, 18.52538)
+    assert data["notification_reason"] == "redispatch_price_drop"
+    assert data["previous_notified_price"] == 2699
+    assert data["redispatch_drop_percent"] == 18.53
+
+
+def test_repeat_threshold_is_at_least_fifteen_percent():
+    assert deal_engine.REDISPATCH_PRICE_DROP_PERCENT >= 15
+
+
+def test_sub_fifteen_repeat_is_blocked_even_with_large_store_gap(monkeypatch):
+    monkeypatch.setenv("REDISPATCH_PRICE_DROP_PERCENT", "5")
+    monkeypatch.setattr(creative, "download_image", Mock(return_value=Mock()))
+    result = creative.validate_candidate(candidate(
+        cheapest_price=851, competitor_price=1200, gap_percent=29.08,
+        notification_reason="redispatch_price_drop", redispatch_drop_percent=14.9,
+        previous_notified_price=1000,
+    ))
+    assert not result["ok"]
+    assert any(x.startswith("REDISPATCH_DROP_BELOW_THRESHOLD") for x in result["errors"])
+
+
+def test_fifteen_repeat_uses_previous_price_and_not_competitor_caption(monkeypatch):
+    import run_telegram_approval as approval
+    monkeypatch.setattr(creative, "download_image", Mock(return_value=Mock()))
+    data = candidate(cheapest_price=850, competitor_price=1200, gap_percent=29.17,
+        **deal_engine.redispatch_metadata(True, 1000, 15))
+    assert creative.validate_candidate(data)["ok"]
+    text = approval.caption(data, {"warnings": []})
+    assert "%15,00" in text
+    assert "%29,17" in text
+    assert approval.comparison_price(data)[1] == 1000
+
+
+def test_inflated_repeat_discount_cannot_pass_gate(monkeypatch):
+    monkeypatch.setattr(creative, "download_image", Mock(return_value=Mock()))
+    result = creative.validate_candidate(candidate(
+        cheapest_price=950,competitor_price=1200,gap_percent=20.83,
+        notification_reason="redispatch_price_drop",redispatch_drop_percent=25,
+        previous_notified_price=1000))
+    assert not result["ok"]
+    assert "REDISPATCH_DROP_MISMATCH" in result["errors"]
