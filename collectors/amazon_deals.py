@@ -280,7 +280,10 @@ def main():
     parser.add_argument("--find-competitors", action="store_true",
                         help="Her fırsat ürününü diğer mağazalarda ayrıca ara.")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    parser.add_argument("--defer-competitors", action="store_true")
     args = parser.parse_args()
+    from collectors.database_http import install
+    install(amazon)
 
     rows = collect(max(1, args.limit))
     if args.find_competitors:
@@ -314,7 +317,11 @@ def main():
                               "normalized_title": amazon.normalize_text(row["title"])},
                         prefer="return=minimal",
                     )
-    if args.find_competitors and rows:
+    if args.find_competitors and args.defer_competitors:
+        report = ROOT / "reports" / "amazon_deal_seeds.json"
+        report.parent.mkdir(exist_ok=True)
+        report.write_text(json.dumps({"scan_started_at": os.getenv("PIPELINE_STARTED_AT"), "rows": rows}, ensure_ascii=False), encoding="utf-8")
+    if args.find_competitors and rows and not args.defer_competitors:
         from collectors.amazon_competitors import discover_competitors
         statuses = discover_competitors(
             rows, apply=not args.dry_run,

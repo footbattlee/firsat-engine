@@ -143,18 +143,30 @@ def _search_job(seed, slug, apply, timeout, limit):
     return row
 
 
-def discover_competitors(seeds, apply=False, timeout=120, limit=5):
+def discover_competitors(seeds, apply=False, timeout=120, limit=5, fresh_pairs=None, deduplicate=False):
     # One sequential stream per merchant avoids duplicate offer/variant writes
     # and request bursts to the same store. At most three streams run together.
     streams = {}
+    results = []
+    seen = set()
     for seed in seeds:
         for slug in competitor_stores(seed):
+            identity = seed.get("asin") or seed["merchant_product_id"]
+            if (seed.get("source_store", "amazon"), identity, slug) in (fresh_pairs or set()):
+                results.append({"asin": identity, "source_store": seed.get("source_store", "amazon"), "store": slug,
+                                "status": "matched", "reason": "fresh-approved-offer", "saved": 0})
+                continue
+            key = (slug, search_query(seed).casefold(), str(seed.get("brand") or "").casefold(), str(seed.get("gtin") or ""))
+            if deduplicate and key in seen:
+                results.append({"asin": identity, "source_store": seed.get("source_store", "amazon"), "store": slug,
+                                "status": "covered", "reason": "same-query-in-batch", "saved": 0})
+                continue
+            seen.add(key)
             streams.setdefault(slug, []).append(seed)
     workers = min(3, max(1, int(os.getenv("DEAL_COMPETITOR_WORKERS", "3"))))
     print(f"DEAL COMPETITOR | parallel workers={workers}", flush=True)
     def stream(slug, rows):
         return [_search_job(seed, slug, apply, timeout, limit) for seed in rows]
-    results = []
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = [executor.submit(stream, slug, rows) for slug, rows in streams.items()]
         for future in as_completed(futures):

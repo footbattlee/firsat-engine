@@ -335,16 +335,40 @@ def find_offer(merchant_id, mpid):
     return rows[0] if rows else None
 
 
-def sync_existing_product_image(variant_id, image):
+def sync_existing_product_image(variant_id, image, variant=None, product_images=None):
     if not variant_id or not image:
         return
-    rows = sb("GET", "product_variants", {"id": f"eq.{variant_id}", "select": "id,product_id", "limit": "1"})
-    if not rows:
-        return
-    product_id = rows[0].get("product_id")
-    sb("PATCH", "product_variants", {"id": f"eq.{variant_id}"}, {"image_url": image}, "return=minimal")
-    if product_id:
+    if variant is None:
+        rows = sb("GET", "product_variants", {"id": f"eq.{variant_id}", "select": "id,product_id,image_url", "limit": "1"})
+        if not rows:
+            return
+        variant = rows[0]
+    product_id = variant.get("product_id")
+    if variant.get("image_url") != image:
+        sb("PATCH", "product_variants", {"id": f"eq.{variant_id}"}, {"image_url": image}, "return=minimal")
+    if product_id and (product_images is None or product_images.get(product_id) != image):
         sb("PATCH", "products", {"id": f"eq.{product_id}"}, {"image_url": image}, "return=minimal")
+
+
+def existing_snapshots(products, merchant_id):
+    # Three reads for the entire result batch, rather than offer/variant lookups
+    # and two unconditional image updates for every already known product.
+    ids = list(dict.fromkeys(item["merchant_product_id"] for item in products))
+    if not ids:
+        return {}, {}, {}
+    quoted = ",".join(json.dumps(value) for value in ids)
+    offers = sb("GET", "offers", {"merchant_id": f"eq.{merchant_id}",
+        "merchant_product_id": f"in.({quoted})", "select": "id,product_variant_id,merchant_product_id", "limit": str(len(ids))})
+    variants = []
+    variant_ids = list({row["product_variant_id"] for row in offers})
+    if variant_ids:
+        variants = sb("GET", "product_variants", {"id": "in.("+",".join(variant_ids)+")", "select": "id,product_id,image_url", "limit": str(len(variant_ids))})
+    product_ids = list({row["product_id"] for row in variants})
+    images = []
+    if product_ids:
+        images = sb("GET", "products", {"id": "in.("+",".join(product_ids)+")", "select": "id,image_url", "limit": str(len(product_ids))})
+    return ({row["merchant_product_id"]: row for row in offers},
+            {row["id"]: row for row in variants}, {row["id"]: row.get("image_url") for row in images})
 
 
 def create_variant(item):
@@ -359,12 +383,13 @@ def save_products_to_supabase(products):
     if not SUPABASE_SERVICE_ROLE_KEY:
         print("Supabase skipped: SUPABASE_SERVICE_ROLE_KEY tanımlı değil."); return 0
     merchant_id = get_or_create_merchant(); checked_at = datetime.now(timezone.utc).isoformat(); saved = 0
+    existing, variants, product_images = existing_snapshots(products, merchant_id)
     for item in products:
-        offer = find_offer(merchant_id, item["merchant_product_id"])
+        offer = existing.get(item["merchant_product_id"])
         if offer:
             offer_id = offer["id"]
             sb("PATCH", "offers", {"id": f"eq.{offer_id}"}, {"price": item["price"], "product_url": item["product_url"], "image_url": item.get("image_url"), "currency": "TRY", "in_stock": item["in_stock"], "last_checked_at": checked_at, "updated_at": checked_at}, "return=minimal")
-            sync_existing_product_image(offer.get("product_variant_id"), item.get("image_url"))
+            sync_existing_product_image(offer.get("product_variant_id"), item.get("image_url"), variants.get(offer.get("product_variant_id")), product_images)
         else:
             variant_id = create_variant(item)
             rows = sb("POST", "offers", body={"product_variant_id": variant_id, "merchant_id": merchant_id, "merchant_product_id": item["merchant_product_id"], "product_url": item["product_url"], "price": item["price"], "currency": "TRY", "in_stock": item["in_stock"], "image_url": item.get("image_url"), "last_checked_at": checked_at}, prefer="return=representation")

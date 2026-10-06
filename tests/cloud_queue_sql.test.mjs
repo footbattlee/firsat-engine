@@ -12,7 +12,7 @@ const schema=`
 create role anon;create role authenticated;create role service_role;
 create table public.deal_candidates(id uuid primary key,canonical_product_id uuid unique,status text,scan_started_at timestamptz,notification_reason text,previous_notified_price numeric,redispatch_drop_percent numeric,cheapest_price numeric);
 create table public.deal_approval_dispatches(deal_candidate_id uuid primary key,status text,sent_at timestamptz,created_at timestamptz default now());
-create table public.deal_publications(deal_candidate_id uuid,platform text,status text,updated_at timestamptz,primary key(deal_candidate_id,platform));
+create table public.deal_publications(deal_candidate_id uuid,platform text,status text,updated_at timestamptz,external_post_id text,error_message text,published_at timestamptz,primary key(deal_candidate_id,platform));
 create table public.publication_queue_settings(id boolean primary key,enabled boolean,not_before timestamptz,source_after timestamptz);
 create table public.publication_scan_batches(started_at timestamptz primary key,completed_at timestamptz);
 create table public.publication_queue(candidate_id uuid primary key,canonical_product_id uuid unique,state text default 'queued',
@@ -28,6 +28,7 @@ async function fixture(fn){
  const db=new PGlite();try{
   await db.exec(schema);
   await db.exec(readFileSync(new URL('../supabase/publication_queue_admin_scope.sql',import.meta.url),'utf8'));
+  await db.exec(readFileSync(new URL('../supabase/publication_channel_delivery.sql',import.meta.url),'utf8'));
   await db.exec('create trigger enqueue_publication_candidate after insert or update on public.deal_candidates for each row execute function public.queue_deal_candidate()');
   await db.query('insert into public.deal_candidates(id,canonical_product_id,status,scan_started_at) values($1,$1,$2,$3)',[id,'candidate',old]);
   await fn(db);
@@ -91,7 +92,7 @@ test('new notification restores excluded held item but never ambiguous held item
 test('known published and ambiguous failed Instagram records never qualify',()=>fixture(async db=>{
  await sent(db);
  for(const state of ['published','publishing','failed']){
-  await db.query("insert into public.deal_publications values($1,'instagram',$2,now()) on conflict(deal_candidate_id,platform) do update set status=excluded.status",[id,state]);
+  await db.query("insert into public.deal_publications(deal_candidate_id,platform,status,updated_at) values($1,'instagram',$2,now()) on conflict(deal_candidate_id,platform) do update set status=excluded.status",[id,state]);
   assert.equal(await eligible(db),false);
  }
 }));
@@ -126,4 +127,30 @@ test('legacy repeat without original price context stays excluded',()=>fixture(a
  await db.query("update public.deal_approval_dispatches set created_at='2026-10-03T00:00:00Z'");
  await db.query("update public.publication_queue set notification_context=null");
  assert.equal(await eligible(db),false);
+}));
+
+
+test('only a proven Instagram publication may claim secondary channels and each is reserved once',()=>fixture(async db=>{
+ await sent(db);
+ await db.exec("update public.publication_queue set snapshot='{}',state='published'");
+ assert.equal((await db.query("select public.claim_publication_channel($1,'story') as token",[id])).rows[0].token,null);
+ await db.query("insert into public.deal_publications(deal_candidate_id,platform,status) values($1,'instagram','published')",[id]);
+ const token=(await db.query("select public.claim_publication_channel($1,'story') as token",[id])).rows[0].token;
+ assert.ok(token);
+ assert.equal((await db.query("select public.claim_publication_channel($1,'story') as token",[id])).rows[0].token,null);
+ assert.equal((await db.query("select public.finish_publication_channel($1,'story',$2,$3) as ok",[id,token,{status:'published',external_post_id:'42',published_at:'2026-10-06T07:00:00Z'}])).rows[0].ok,true);
+ assert.equal((await db.query("select public.claim_publication_channel($1,'story') as token",[id])).rows[0].token,null);
+ const hour=(await db.query("select extract(hour from now() at time zone 'Europe/Istanbul') as hour")).rows[0].hour;
+ assert.equal(!!(await db.query("select public.claim_publication_channel($1,'telegram') as token",[id])).rows[0].token,Number(hour)>=10&&Number(hour)<=23);
+}));
+test('delivery retries respect backoff, disabled schedule and original scan cutoff',()=>fixture(async db=>{
+ await sent(db);await db.exec("update public.publication_queue set snapshot='{}',state='published'");
+ await db.query("insert into public.deal_publications(deal_candidate_id,platform,status) values($1,'instagram','published')",[id]);
+ const token=(await db.query("select public.claim_publication_channel($1,'story') as token",[id])).rows[0].token;
+ await db.query("select public.finish_publication_channel($1,'story',$2,$3)",[id,token,{status:'failed',error_message:'429',next_attempt_at:'infinity'}]);
+ assert.equal((await db.query("select public.claim_publication_channel($1,'story') as token",[id])).rows[0].token,null);
+ await db.exec("update public.publication_queue_settings set enabled=false");
+ assert.equal((await db.query("select public.claim_publication_channel($1,'telegram') as token",[id])).rows[0].token,null);
+ await db.exec("update public.publication_queue_settings set enabled=true,source_after='2026-10-05T00:00:00Z'");
+ assert.equal((await db.query("select public.claim_publication_channel($1,'telegram') as token",[id])).rows[0].token,null);
 }));

@@ -16,3 +16,16 @@ select cron.schedule(
  );$job$
 );
 update public.publication_queue_settings set enabled=true where id=true;
+
+-- Repair confirmed Instagram outcomes and missing channel deliveries independently.
+do $block$ declare job record; begin
+ for job in select jobid from cron.job where jobname='publication-delivery-recovery'
+ loop perform cron.unschedule(job.jobid);end loop;
+end $block$;
+select cron.schedule('publication-delivery-recovery','*/5 * * * *',
+$job$select net.http_post(
+ url := 'https://cmexmobjpeavlppmffqi.supabase.co/functions/v1/publication-queue',
+ headers := jsonb_build_object('Content-Type','application/json',
+ 'x-publication-queue-token',(select decrypted_secret from vault.decrypted_secrets where name='publication_queue_token')),
+ body := '{"mode":"recover"}'::jsonb, timeout_milliseconds := 120000
+);$job$);

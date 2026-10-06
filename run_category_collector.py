@@ -19,6 +19,8 @@ def load_module(script: Path):
         raise RuntimeError(f"Collector yüklenemedi: {script}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    from collectors.database_http import install
+    install(module)
     return module
 
 

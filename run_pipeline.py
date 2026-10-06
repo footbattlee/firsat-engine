@@ -193,7 +193,7 @@ def run_collector(name: str, script: Path, category: dict) -> dict:
     return run_process("COLLECT", name, command, category=category)
 
 
-def run_special_collector(name: str, script: Path) -> dict:
+def run_special_collector(name: str, script: Path, *, defer_competitors=False) -> dict:
     if not script.exists():
         return {
             "stage": "COLLECT",
@@ -206,6 +206,8 @@ def run_special_collector(name: str, script: Path) -> dict:
     command = [sys.executable, str(script)]
     if script == AMAZON_DEALS_COLLECTOR or script.name in {"trendyol_deals.py", "hepsiburada_deals.py"}:
         command.append("--find-competitors")
+        if defer_competitors:
+            command.append("--defer-competitors")
     return run_process("COLLECT", name, command)
 
 
@@ -223,6 +225,10 @@ def run_post_step(stage: str, name: str, script: Path) -> dict:
 
 
 def print_summary(results, total_seconds, category_count, stopped=False):
+    report = ROOT / "reports" / "pipeline_timings.json"
+    report.parent.mkdir(exist_ok=True)
+    report.write_text(json.dumps({"scan_started_at": os.getenv("PIPELINE_STARTED_AT"),
+        "total_seconds": total_seconds, "stopped": stopped, "steps": results}, ensure_ascii=False, indent=2), encoding="utf-8")
     print("\n" + "=" * 96)
     print("FIRSAT ENGINE - MULTI CATEGORY PIPELINE SUMMARY")
     print("=" * 96)
@@ -306,7 +312,7 @@ def main():
         total_collector_runs += 1
     total_collector_runs += len(marketplace_deals)
     print(f"Toplam collector çalışması: {total_collector_runs}")
-    print("Akış: Amazon / Trendyol / Hepsiburada fırsatları -> Ürüne özel rakip araması -> Kategori taramaları -> Apply Matches -> Competitor Refresh -> Deal Engine")
+    print("Akış: Amazon / Trendyol / Hepsiburada fırsatları -> Kategori taramaları -> Eksik rakip araması -> Apply Matches -> Competitor Refresh -> Deal Engine")
     print("Her alt kategori ana sorguyla; tanımlıysa kontrollü marka sorgularıyla da taranır.")
     print("Collector hataları loglanır; diğer mağaza/kategoriler çalışmaya devam eder.")
     print("Sadece Matcher / Apply Matches / Deal Engine gibi kritik analiz adımları hata verirse pipeline durur.")
@@ -329,16 +335,16 @@ def main():
                 if collector_name in enabled_stores:
                     collector_jobs.append((collector_name, collector_script, search))
 
-    # Discover competitors for Amazon deals before the ordinary category scans.
-    # Discovery is independent of categories.json and finishes before matching.
+    # Collect campaign seeds first. Rival discovery follows category scans so
+    # fresh approved competitors are reused rather than searched twice.
     if amazon_deals_enabled:
-        amazon_result = run_special_collector("Amazon Fırsat Sayfaları", AMAZON_DEALS_COLLECTOR)
+        amazon_result = run_special_collector("Amazon Fırsat Sayfaları", AMAZON_DEALS_COLLECTOR, defer_competitors=True)
         results.append(amazon_result)
         if not amazon_result["ok"]:
             print("UYARI | Amazon fırsat/rakip araması tamamlanamadı; sonuçlar kısmi olabilir.")
 
     for name, script in marketplace_deals:
-        result = run_special_collector(name, script)
+        result = run_special_collector(name, script, defer_competitors=True)
         results.append(result)
         if not result["ok"]:
             print(f"UYARI | {name}: fırsat/rakip araması kısmi veya başarısız.")
@@ -347,7 +353,7 @@ def main():
     # instead of serializing hundreds of network-bound searches. Keep the
     # default conservative to reduce 403/503 pressure on store sites.
     try:
-        collector_workers = max(1, int(os.getenv("COLLECTOR_WORKERS", "3")))
+        collector_workers = min(3, max(1, int(os.getenv("COLLECTOR_WORKERS", "3"))))
     except ValueError:
         raise RuntimeError("COLLECTOR_WORKERS tam sayı olmalı.")
 
@@ -383,6 +389,12 @@ def main():
             for future in future_jobs:
                 future.cancel()
             raise
+
+    if amazon_deals_enabled or marketplace_deals:
+        batch = run_post_step("DISCOVER", "Missing Deal Competitors", ROOT / "collectors" / "deal_competitor_batch.py")
+        results.append(batch)
+        if not batch["ok"]:
+            print("UYARI | Eksik rakip araması tamamlanamadı; eldeki doğrulanmış fiyatlar kullanılacak.")
 
     # Eşleştirme ve fırsat hesapları tüm ulaşılabilen mağaza/kategori verileri toplandıktan sonra bir kez çalışır.
     for stage, name, script in POST_STEPS:

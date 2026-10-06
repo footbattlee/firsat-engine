@@ -4,11 +4,13 @@ import {parseHTML} from 'npm:linkedom@0.18.12';
 import {allowedUrl,samePath,products,verifiedOffer,validateGap,slotKey,discountPresentation} from './core.ts';
 import {artwork} from './artwork.ts';
 import {fetchProductImage} from './image.ts';
+import {caption,apiJSON,DeliveryError,deliverChannels,matchingMedia} from './delivery.ts';
 const env=(n:string)=>Deno.env.get(n)?.trim()||'';
 const service=env('SUPABASE_SERVICE_ROLE_KEY')||(()=>{try{return JSON.parse(env('SUPABASE_SECRET_KEYS')).default||'';}catch{return '';}})();
 const url=env('SUPABASE_URL'),sb=createClient(url,service);
 const bucket=env('INSTAGRAM_MEDIA_BUCKET')||'instagram-media';
 const igBase=env('INSTAGRAM_GRAPH_BASE')||'https://graph.instagram.com',igToken=env('INSTAGRAM_ACCESS_TOKEN'),igUser=env('INSTAGRAM_USER_ID');
+const publicChat=env('TELEGRAM_PUBLISH_CHAT_ID'),fbToken=env('FACEBOOK_SYSTEM_USER_TOKEN'),fbPage=env('FACEBOOK_PAGE_ID'),fbVersion=env('FACEBOOK_GRAPH_VERSION')||'v26.0';
 const storyChat=env('TELEGRAM_STORY_CHAT_ID')||env('TELEGRAM_APPROVAL_CHAT_ID'),bot=env('TELEGRAM_BOT_TOKEN');
 async function checked(result:any){if(result.error)throw result.error;return result.data;}
 async function rpc(name:string,args={}){return checked(await sb.rpc(name,args));}
@@ -70,60 +72,136 @@ async function prepare(d:any,slot:string){
  for(const [path,bytes] of [[base+'-post.png',post],[base+'-story.png',story]] as [string,Uint8Array][]){
   await checked(await sb.storage.from(bucket).upload(path,bytes,{contentType:'image/png',upsert:true}));
  }
- return {...d,post_url:sb.storage.from(bucket).getPublicUrl(base+'-post.png').data.publicUrl,story_path:base+'-story.png'};
+ return {...d,publication_slot:slot,post_path:base+'-post.png',post_url:sb.storage.from(bucket).getPublicUrl(base+'-post.png').data.publicUrl,story_path:base+'-story.png'};
 }
-const money=(v:any)=>new Intl.NumberFormat('tr-TR',{maximumFractionDigits:2}).format(v)+' TL';
-async function instagram(d:any){
- const discount=discountPresentation(d);
- const percent=new Intl.NumberFormat('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2}).format(discount.percent);
- const caption=`🔥 FİYATZADE FIRSATI\n\n${d.title}\n\n🛒 ${d.merchant}\n💸 ${discount.repeat?'Önceki paylaşım fiyatı':'Rakip fiyat'}: ${money(discount.comparisonPrice)}\n🔥 Fırsat fiyatı: ${money(d.cheapest_price)}\n📉 ${discount.repeat?'Son paylaşımdan sonra %'+percent+' düştü':'Rakipten %'+percent+' daha ucuz'}\n\n🔗 Fırsata git: ${url}/functions/v1/deal-click?${new URLSearchParams({deal:d.id,offer:d.offer_id,channel:'instagram'})}\n\nFiyat bilgisi son taramaya aittir; fiyat ve stok değişebilir.\n#işbirliği #reklam #indirim #fırsat`;
- async function graph(path:string,body?:URLSearchParams){
-  const r=await fetch(igBase+'/'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+igToken,...(body?{'Content-Type':'application/x-www-form-urlencoded'}:{})},body,signal:AbortSignal.timeout(20000)});
-  const j=await r.json();if(!r.ok)throw Error('instagram-api-failed');return j;
+
+async function graph(path:string,body?:URLSearchParams){
+ return apiJSON(fetch,igBase+'/'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+igToken,...(body?{'Content-Type':'application/x-www-form-urlencoded'}:{})},body},body?90000:20000);
+}
+async function instagram(d:any,container?:string){
+ let id=container;
+ if(!id){
+  const j=await graph(igUser+'/media',new URLSearchParams({image_url:d.post_url,caption:caption(d,url,'instagram')}));
+  if(!j.id)throw new DeliveryError('instagram-container-missing',false,true);
+  id=String(j.id);
+  await checked(await sb.from('deal_publications').update({container_id:id,updated_at:new Date().toISOString()}).eq('deal_candidate_id',d.id).eq('platform','instagram'));
  }
- const j=await graph(igUser+'/media',new URLSearchParams({image_url:d.post_url,caption}));if(!j.id)throw Error('instagram-container-missing');
  for(let i=0;i<12;i++){
-  const status=await graph(j.id+'?fields=status_code');
+  const status=await graph(id+'?fields=status_code');
   if(status.status_code==='FINISHED'){
-   const out=await graph(igUser+'/media_publish',new URLSearchParams({creation_id:String(j.id)}));if(!out.id)throw Error('instagram-result-missing');return String(out.id);
+   // Persist the point after which a timeout must be reconciled, never republished.
+   const requested=new Date().toISOString();
+   const reservation=await checked(await sb.from('deal_publications').update({publish_requested_at:requested}).eq('deal_candidate_id',d.id).eq('platform','instagram').eq('status','publishing').is('publish_requested_at',null).select('id'));
+   if(!reservation.length)throw new DeliveryError('instagram-publish-already-requested',false,true);
+   let out:any;
+   try{out=await graph(igUser+'/media_publish',new URLSearchParams({creation_id:id}));}
+   catch(e){
+    if(e instanceof DeliveryError&&!e.ambiguous)await checked(await sb.from('deal_publications').update({publish_requested_at:null}).eq('deal_candidate_id',d.id).eq('platform','instagram').eq('publish_requested_at',requested));
+    throw e;
+   }
+   if(!out.id)throw new DeliveryError('instagram-result-missing',false,true);
+   return String(out.id);
   }
-  if(['ERROR','EXPIRED'].includes(status.status_code))throw Error('instagram-container-failed');
+  if(['ERROR','EXPIRED'].includes(status.status_code))throw new DeliveryError('instagram-container-failed');
   await new Promise(resolve=>setTimeout(resolve,3000));
  }
- throw Error('instagram-container-timeout');
+ throw new DeliveryError('instagram-container-not-ready',true);
 }
-async function story(d:any){
- const {data,error}=await sb.storage.from(bucket).download(d.story_path);if(error)throw Error('story-file-unavailable');
- const fd=new FormData();fd.set('chat_id',storyChat);fd.set('caption',`📱 STORY HAZIR — gönderi yayınlandı\n\n${String(d.title).slice(0,400)}\n\n🔗 Ürüne git: ${tracked(d)}`);
- fd.set('document',data,'story.png');
- const r=await fetch(`https://api.telegram.org/bot${bot}/sendDocument`,{method:'POST',body:fd,signal:AbortSignal.timeout(20000)});
- const j=await r.json();if(!j.ok)throw Error('story-delivery-failed');return String(j.result.message_id);
+function originalSlot(d:any){
+ if(d.publication_slot)return d.publication_slot;
+ const digits=String(d.post_url||'').match(/queue-(\d{14})/);
+ if(!digits)return '';
+ const v=digits[1];return v.slice(0,4)+'-'+v.slice(4,6)+'-'+v.slice(6,8)+'T'+v.slice(8,10)+':'+v.slice(10,12)+':'+v.slice(12,14)+'Z';
 }
-async function deliverStory(q:any){
- const state=await checked(await sb.from('deal_publications').select('status').eq('deal_candidate_id',q.candidate_id).eq('platform','story').maybeSingle());
- if(state?.status!=='pending')return;
- const claimed=await checked(await sb.from('deal_publications').update({status:'publishing',updated_at:new Date().toISOString()}).eq('deal_candidate_id',q.candidate_id).eq('platform','story').eq('status','pending').select('id'));
- if(!claimed.length)return;
- try{
-  const out=await story(q.snapshot);
-  await checked(await sb.from('deal_publications').update({status:'published',external_post_id:out,published_at:new Date().toISOString()}).eq('deal_candidate_id',q.candidate_id).eq('platform','story'));
- }catch{
-  // Ambiguous Telegram timeouts are held for inspection instead of resent.
-  await checked(await sb.from('publication_queue').update({last_error:'story-delivery-requires-review'}).eq('candidate_id',q.candidate_id));
+function dispatchDelivery(id:string){
+ // A separate invocation gives each platform its own execution time budget.
+ EdgeRuntime.waitUntil(fetch(url+'/functions/v1/publication-queue',{
+  method:'POST',headers:{Authorization:'Bearer '+service,'Content-Type':'application/json'},
+  body:JSON.stringify({mode:'deliver',candidate_id:id}),signal:AbortSignal.timeout(120000)
+ }).then(r=>{if(!r.ok)console.error('publication-delivery-dispatch-failed',r.status);}).catch(()=>console.error('publication-delivery-dispatch-unavailable')));
+}
+async function confirmInstagram(q:any,out:string,timestamp=new Date().toISOString()){
+ await checked(await sb.from('deal_publications').update({status:'published',external_post_id:out,published_at:timestamp,error_message:null,updated_at:new Date().toISOString()}).eq('deal_candidate_id',q.candidate_id).eq('platform','instagram').eq('status','publishing'));
+ await checked(await sb.from('publication_queue').update({state:'published',last_error:null,updated_at:new Date().toISOString()}).eq('candidate_id',q.candidate_id).in('state',['held','publishing']));
+ dispatchDelivery(q.candidate_id);
+}
+async function reconcileInstagram(allowResume=false){
+ const hour=Number(new Intl.DateTimeFormat("en-US",{timeZone:"Europe/Istanbul",hour:"numeric",hourCycle:"h23"}).format(new Date()));
+ allowResume=allowResume&&hour>=10&&hour<=23;
+ if(!igToken||!igUser)return 0;
+ const settings=await checked(await sb.from('publication_queue_settings').select('source_after').eq('id',true).single());
+ const rows=await checked(await sb.from('publication_queue').select('*').in('state',['held','publishing']).not('snapshot','is',null).gte('source_run_started_at',settings.source_after||'1970-01-01T00:00:00Z').lt('updated_at',new Date(Date.now()-120000).toISOString()).limit(30));
+ if(!rows.length)return 0;
+ let media:any[];
+ try{media=(await graph(igUser+'/media?fields=id,caption,timestamp,media_type&limit=100' )).data||[];}catch{media=[];}
+ let count=0,resumed=0;
+ for(const q of rows){
+  const p=await checked(await sb.from('deal_publications').select('status,container_id,publish_requested_at,external_post_id,published_at').eq('deal_candidate_id',q.candidate_id).eq('platform','instagram').maybeSingle());
+  if(p?.status==='published'&&p.external_post_id){await confirmInstagram(q,p.external_post_id,p.published_at);count++;continue;}
+  if(p?.status!=='publishing')continue;
+  const matches=matchingMedia(media,q.candidate_id,p.publish_requested_at||originalSlot(q.snapshot));
+  if(matches.length===1){await confirmInstagram(q,String(matches[0].id),matches[0].timestamp);count++;continue;}
+  // A saved container can be resumed only if media_publish was never requested.
+  if(allowResume&&p.container_id&&!p.publish_requested_at&&resumed<1&&Date.now()-Date.parse(originalSlot(q.snapshot))<=600000){
+   resumed++;
+   try{const id=await instagram(q.snapshot,p.container_id);await confirmInstagram(q,id);count++;}catch(e){await checked(await sb.from('deal_publications').update({error_message:e instanceof DeliveryError?e.code:'instagram-outcome-unknown',updated_at:new Date().toISOString()}).eq('deal_candidate_id',q.candidate_id).eq('platform','instagram'));}
+  }
  }
+ return count;
 }
-async function run(){
+async function facebookPageToken(){
+ if(!fbToken||!fbPage)throw new DeliveryError('facebook-configuration-missing',true);
+ let j:any;
+ try{j=await apiJSON(fetch,'https://graph.facebook.com/'+fbVersion+'/'+fbPage+'?'+new URLSearchParams({fields:'id,name,access_token',access_token:fbToken}),{},20000);}
+ catch(e){throw new DeliveryError(e instanceof DeliveryError?e.code:'facebook-token-unavailable',true);}
+ if(String(j.id)!==fbPage||!j.access_token)throw new DeliveryError('facebook-page-token-missing',true);
+ return String(j.access_token);
+}
+async function sendChannel(platform:string,d:any){
+ if(platform==='facebook'){
+  const token=await facebookPageToken();
+  const fd=new FormData();fd.set('access_token',token);fd.set('url',d.post_url);fd.set('caption',caption(d,url,'facebook'));fd.set('published','true');
+  const j=await apiJSON(fetch,'https://graph.facebook.com/'+fbVersion+'/'+fbPage+'/photos',{method:'POST',body:fd},90000);
+  if(!j.id)throw new DeliveryError('facebook-result-missing',false,true);
+  return String(j.post_id||j.id);
+ }
+ const chat=platform==='story'?storyChat:publicChat;
+ if(!bot||!chat)throw new DeliveryError(platform+'-configuration-missing',true);
+ const fd=new FormData();fd.set('chat_id',chat);
+ if(platform==='story'){
+  const {data,error}=await sb.storage.from(bucket).download(d.story_path);
+  if(error||!data)throw new DeliveryError('story-file-unavailable',true);
+  fd.set('document',data,'story.png');fd.set('caption',`📱 STORY HAZIR — gönderi yayınlandı\n\n${String(d.title).slice(0,400)}\n\n🔗 Ürüne git: ${tracked(d)}`);
+ }else{
+  // Upload the owned PNG directly. Asking Telegram to fetch a remote image
+  // added a second network hop and caused long/ambiguous sendPhoto responses.
+  const imageUrl=new URL(d.post_url),prefix='/storage/v1/object/public/'+bucket+'/';
+  if(imageUrl.origin!==new URL(url).origin||!imageUrl.pathname.startsWith(prefix+'deals/'+d.id+'/'))throw new DeliveryError('telegram-photo-path-invalid');
+  const path=decodeURIComponent(imageUrl.pathname.slice(prefix.length));
+  const {data,error}=await sb.storage.from(bucket).download(path);
+  if(error||!data)throw new DeliveryError('telegram-photo-unavailable',true);
+  fd.set('photo',data,'fiyatzade.png');fd.set('caption',caption(d,url,'telegram'));
+ }
+ const j=await apiJSON(fetch,'https://api.telegram.org/bot'+bot+'/'+(platform==='story'?'sendDocument':'sendPhoto'),{method:'POST',body:fd},60000);
+ if(!j.result?.message_id)throw new DeliveryError(platform+'-result-missing',false,true);
+ return String(j.result.message_id);
+}
+async function deliverAll(q:any){
+ return deliverChannels(q,{
+  claim:(id:string,platform:string)=>rpc('claim_publication_channel',{p_id:id,p_platform:platform}),
+  finish:(id:string,platform:string,claim:string,result:any)=>rpc('finish_publication_channel',{p_id:id,p_platform:platform,p_claim:claim,p_result:result}),
+  send:sendChannel
+ });
+}
+async function run(recoveryOnly=false){
  const settings=await checked(await sb.from('publication_queue_settings').select('*').eq('id',true).single());
  if(!settings.enabled||Date.now()<new Date(settings.not_before||0).getTime())return {status:'waiting',reason:'scheduled-start'};
- if(!igToken||!igUser||!bot||!storyChat)throw Error('publisher-configuration-missing');
- // Recover known successful Instagram publications before handling a new slot.
- const pendingStories=await checked(await sb.from('deal_publications').select('deal_candidate_id').eq('platform','story').eq('status','pending').limit(1000));
- const storyIds=pendingStories.map((p:any)=>p.deal_candidate_id);
- const recovery=storyIds.length?await checked(await sb.from('publication_queue').select('*').in('state',['published','publishing']).in('candidate_id',storyIds).not('snapshot','is',null).gte('source_run_started_at',settings.source_after||'1970-01-01T00:00:00Z').limit(10)):[];
- for(const q of recovery){
-  const p=await checked(await sb.from('deal_publications').select('status').eq('deal_candidate_id',q.candidate_id).eq('platform','instagram').maybeSingle());
-  if(p?.status==='published'&&q.snapshot){await checked(await sb.from('publication_queue').update({state:'published'}).eq('candidate_id',q.candidate_id));await deliverStory(q);}
- }
+ const recovered=await reconcileInstagram(recoveryOnly);
+ const deliveries=[];
+ const waiting=recoveryOnly&&recovered===0?await rpc('pending_publication_deliveries',{p_limit:1}):[];
+ for(const q of waiting)deliveries.push({candidate_id:q.candidate_id,results:await deliverAll(q)});
+ if(recoveryOnly)return {status:'recovered',reconciled:recovered,deliveries};
+ if(!igToken||!igUser)throw Error('instagram-configuration-missing');
  await checked(await sb.from('publication_queue').update({state:'held',last_error:'Interrupted Instagram publication requires review'}).eq('state','publishing').lt('updated_at',new Date(Date.now()-600000).toISOString()));
  const slot=await rpc('start_publication_slot');if(!slot)return {status:'waiting'};
  const deadline=Date.now()+85000;
@@ -137,9 +215,10 @@ async function run(){
   try{
    const out=await instagram(d);
    await checked(await sb.from('deal_publications').update({status:'published',external_post_id:out,published_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('deal_candidate_id',q.candidate_id).eq('platform','instagram'));
-   await updateQueue(q,{state:'published',last_error:null});q.snapshot=d;await deliverStory(q);
-   return {status:'published',candidate_id:q.candidate_id};
-  }catch(e){await updateQueue(q,{state:'held',last_error:'Instagram outcome requires review'});return {status:'held',candidate_id:q.candidate_id};}
+   await updateQueue(q,{state:'published',last_error:null});q.snapshot=d;
+  }catch(e){const reason=e instanceof DeliveryError?e.code:'instagram-outcome-unknown';await checked(await sb.from('deal_publications').update({error_message:reason,updated_at:new Date().toISOString()}).eq('deal_candidate_id',q.candidate_id).eq('platform','instagram'));await updateQueue(q,{state:'held',last_error:'Instagram outcome requires review: '+reason});return {status:'held',candidate_id:q.candidate_id,reason};}
+  await rpc('ensure_publication_channels',{p_id:q.candidate_id});dispatchDelivery(q.candidate_id);
+  return {status:'published',candidate_id:q.candidate_id,deliveries:'scheduled'};
  }
  return {status:'unverified'};
 }
@@ -177,6 +256,16 @@ Deno.serve(async(req)=>{
    for(const q of rows){try{const d=await candidate(q.candidate_id);const photo=await image(d);const png=await artwork(d,photo.bytes,photo.type);results.push({id:d.id,status:'verified',image_bytes:png.length});}catch(e){results.push({id:q.candidate_id,status:'unverified',reason:String(e).slice(0,160)});}}
    return Response.json({dry_run:true,slot:slotKey(new Date()),results,published:0});
   }
-  return Response.json(await run());
+  if(body.mode==='configuration-test'){
+   const targets:any={instagram:!!(igToken&&igUser),telegram:!!(bot&&publicChat),story:!!(bot&&storyChat),facebook:!!(fbToken&&fbPage)};
+   for(const [name,chat] of [['telegram',publicChat],['story',storyChat]])if(bot&&chat){try{const j=await apiJSON(fetch,'https://api.telegram.org/bot'+bot+'/getChat?'+new URLSearchParams({chat_id:chat}));targets[name]={configured:true,title:j.result.title};}catch(e){targets[name]={configured:true,error:(e as Error).message};}}
+   if(fbToken&&fbPage){try{await facebookPageToken();targets.facebook={configured:true,verified:true};}catch(e){targets.facebook={configured:true,error:(e as Error).message};}}
+   return Response.json({targets,published:0});
+  }
+  if(body.mode==='deliver'){
+   const q=await checked(await sb.from('publication_queue').select('*').eq('candidate_id',String(body.candidate_id)).eq('state','published').not('snapshot','is',null).single());
+   return Response.json({candidate_id:q.candidate_id,deliveries:await deliverAll(q)});
+  }
+  return Response.json(await run(body.mode==='recover'));
  }catch(e){console.error('publication-queue',String(e));return Response.json({error:'queue-worker-failed'},{status:500});}
 });

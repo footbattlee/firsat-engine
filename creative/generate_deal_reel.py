@@ -117,7 +117,7 @@ def render_reel(data, story_path, output_path=None):
     command += [
         "-filter_complex", filter_graph,
         "-map", "[outv]", "-r", "30", "-c:v", "libx264",
-        "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+        "-preset", os.getenv("REELS_ENCODER_PRESET", "veryfast"), "-crf", "20", "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
     ]
     if audio:

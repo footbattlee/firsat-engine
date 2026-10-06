@@ -7,6 +7,7 @@ import re
 import sys
 import time
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -199,6 +200,38 @@ def refresh_one(session, target, slug, cutoff, apply=False):
     return values
 
 
+def refresh_targets(targets, merchants, cutoff, apply=False, *, budget=600, delay=0.35, workers=3):
+    """Serial requests within each merchant; at most three merchant streams."""
+    started = time.monotonic()
+    streams = {}
+    for index, target in enumerate(targets, 1):
+        slug = merchants.get(target['merchant_id'], '')
+        streams.setdefault(slug, []).append((index, target))
+    def stream(slug, rows):
+        ok = failed = 0
+        with requests.Session() as session:
+            session.headers.update(BROWSER_HEADERS)
+            for index, target in rows:
+                if time.monotonic() - started >= budget:
+                    break
+                try:
+                    result = refresh_one(session, target, slug, cutoff, apply)
+                    ok += 1
+                    print(f'REFRESH | {index}/{len(targets)} | {slug} | {target["id"]} | VERIFIED | price={result["price"]} | stock={result["in_stock"]}', flush=True)
+                except Exception as exc:
+                    failed += 1
+                    detail = str(exc).replace('|', '/').replace('\n', ' ')[:120]
+                    print(f'REFRESH | {index}/{len(targets)} | {slug} | {target["id"]} | UNVERIFIED | {type(exc).__name__}: {detail}', flush=True)
+                time.sleep(delay)
+        return ok, failed
+    totals = []
+    with ThreadPoolExecutor(max_workers=min(3, max(1, workers))) as executor:
+        futures = [executor.submit(stream, slug, rows) for slug, rows in streams.items()]
+        for future in as_completed(futures):
+            totals.append(future.result())
+    return sum(x[0] for x in totals), sum(x[1] for x in totals)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--apply', action='store_true')
@@ -216,23 +249,8 @@ def main():
     budget = max(0, int(os.getenv('COMPETITOR_REFRESH_SECONDS', '600')))
     delay = max(0.0, float(os.getenv('COMPETITOR_REFRESH_DELAY', '0.35')))
     print(f'REFRESH | targets={len(targets)} | limit={limit} | apply={args.apply}', flush=True)
-    started = time.monotonic()
-    ok = failed = 0
-    with requests.Session() as session:
-        session.headers.update(BROWSER_HEADERS)
-        for index, target in enumerate(targets[:limit], 1):
-            if time.monotonic() - started >= budget:
-                break
-            slug = merchants.get(target['merchant_id'], '')
-            try:
-                result = refresh_one(session, target, slug, cutoff, args.apply)
-                ok += 1
-                print(f'REFRESH | {index}/{min(limit,len(targets))} | {slug} | {target["id"]} | VERIFIED | price={result["price"]} | stock={result["in_stock"]}', flush=True)
-            except Exception as exc:
-                failed += 1
-                detail = str(exc).replace('|', '/').replace('\n', ' ')[:120]
-                print(f'REFRESH | {index}/{min(limit,len(targets))} | {slug} | {target["id"]} | UNVERIFIED | {type(exc).__name__}: {detail}', flush=True)
-            time.sleep(delay)
+    ok, failed = refresh_targets(targets[:limit], merchants, cutoff, args.apply,
+                                 budget=budget, delay=delay)
     print(f'REFRESH | verified={ok} | failed={failed} | deferred={len(targets)-ok-failed}', flush=True)
 
 

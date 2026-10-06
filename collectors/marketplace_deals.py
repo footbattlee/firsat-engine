@@ -168,7 +168,10 @@ def main(slug):
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--find-competitors', action='store_true')
     parser.add_argument('--limit', type=int, default=int(os.getenv(f'{slug.upper()}_DEALS_LIMIT', '30')))
+    parser.add_argument("--defer-competitors", action="store_true")
     args = parser.parse_args()
+    from collectors.database_http import install
+    install(trendyol if slug == "trendyol" else hb)
     rows = collect(slug, max(1, args.limit))
     if args.dry_run:
         print(json.dumps(rows[:20], ensure_ascii=False, indent=2))
@@ -184,7 +187,11 @@ def main(slug):
                     body={'brand': row['brand'], 'title': row['title'],
                           'normalized_title': module.normalize_text(row['title'])},
                     prefer='return=minimal')
-    if rows and args.find_competitors:
+    if args.find_competitors and args.defer_competitors:
+        report = ROOT / "reports" / f"{slug}_deal_seeds.json"
+        report.parent.mkdir(exist_ok=True)
+        report.write_text(json.dumps({"scan_started_at": os.getenv("PIPELINE_STARTED_AT"), "rows": rows}, ensure_ascii=False), encoding="utf-8")
+    if rows and args.find_competitors and not args.defer_competitors:
         statuses = discover_competitors(rows, apply=not args.dry_run,
             timeout=max(1, int(os.getenv('DEAL_COMPETITOR_TIMEOUT', '120'))),
             limit=max(1, int(os.getenv('DEAL_COMPETITOR_SEARCH_LIMIT', '5'))))
