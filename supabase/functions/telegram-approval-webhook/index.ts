@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { formatClickReport } from "../_shared/click-report.mjs";
 
 const env=(n:string)=>Deno.env.get(n)?.trim()||"";
 const BOT=env("TELEGRAM_BOT_TOKEN");
@@ -202,24 +203,9 @@ function reportDays(text:string){
  return m?Math.min(90,Math.max(1,Number(m[1]))):null;
 }
 async function clickReport(days:number,completeDays=false){
- const {data,error}=await sb.rpc("get_click_report",{p_days:days,p_complete_days:completeDays});
+ const {data,error}=await sb.rpc("get_click_report_v2",{p_days:days,p_complete_days:completeDays});
  if(error)throw error;
- const rows=(data||[]) as any[];
- const total=rows.reduce((n,r)=>n+Number(r.clicks||0),0);
- const channels=new Map<string,number>(),merchants=new Map<string,number>(),products=new Map<string,number>();
- for(const r of rows){
-  const count=Number(r.clicks||0);
-  channels.set(String(r.channel||"other"),(channels.get(String(r.channel||"other"))||0)+count);
-  merchants.set(String(r.merchant||"-"),(merchants.get(String(r.merchant||"-"))||0)+count);
-  products.set(String(r.title||"-"),(products.get(String(r.title||"-"))||0)+count);
- }
- const ranked=(m:Map<string,number>,limit:number)=>[...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,limit);
- const lines=["📊 <b>"+days+" Günlük Tıklama Raporu</b>","👆 Toplam tekil gerçek tıklama: <b>"+total+"</b>"];
- if(!total){lines.push("Henüz kaydedilmiş gerçek tıklama yok.");return lines.join("\n")}
- const ch=ranked(channels,10);if(ch.length)lines.push("",...ch.map(([k,v])=>"• "+escapeHtml(k)+": <b>"+v+"</b>"));
- const ms=ranked(merchants,5);if(ms.length)lines.push("","<b>Mağazalar</b>",...ms.map(([k,v],i)=>(i+1)+". "+escapeHtml(k)+" — "+v));
- const ps=ranked(products,10);if(ps.length)lines.push("","<b>En çok tıklanan ürünler</b>",...ps.map(([k,v],i)=>(i+1)+". "+escapeHtml(k).slice(0,100)+" — "+v));
- return lines.join("\n").slice(0,4090);
+ return formatClickReport(data);
 }
 async function sendClickReport(chatId:string,days:number,completeDays=false){
  await tg("sendMessage",{chat_id:chatId,text:await clickReport(days,completeDays),parse_mode:"HTML",disable_web_page_preview:true});

@@ -32,7 +32,8 @@ def test_unknown_channel_becomes_other():
 def test_cloud_click_tracking_deduplicates_visitors_and_detects_preview_headers():
     source = Path("supabase/functions/deal-click/index.ts").read_text(encoding="utf-8")
     assert "visitor_hash" in source
-    assert 'req.headers.get("sec-purpose")' in source
+    classifier = Path("supabase/functions/_shared/click-request.mjs").read_text(encoding="utf-8")
+    assert '"sec-purpose"' in classifier
 
 
 def test_cloud_publish_restores_story_helper_message():

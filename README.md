@@ -84,3 +84,20 @@ node --test tests/cloud_queue.test.ts tests/cloud_images.test.ts
 
 Credentials, virtual environments, generated creatives, scan logs and generated
 competitor-search reports are excluded from Git.
+
+## Link report accuracy
+
+Daily reports sent at 00:01 Istanbul cover the preceding completed calendar day.
+The report shows its exact start and exclusive end timestamps. Browser navigation
+signals are counted per product/channel/day, not as unique people. Requests without
+navigation metadata (including historical records) are reported separately as
+unverified; they can be genuine visits or automated checks. Recognized bots and
+prefetch requests are excluded and do not redirect to affiliate destinations.
+Amazon totals in this report are local measurements, not Amazon Associates data.
+See reports/click_audit_2026-10-08.md for production findings and validation.
+
+Offline request/report/SQL checks require Node 24. Install @electric-sql/pglite in a disposable directory and set QUEUE_SQL_TEST_RUNTIME to that directory:
+
+```powershell
+node --test tests/click_reporting.test.mjs
+```

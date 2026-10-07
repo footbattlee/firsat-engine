@@ -1,9 +1,7 @@
-"""Print click totals by day, channel, merchant and deal."""
+"""Print browser navigation signals and unverified link requests separately."""
 import argparse
 import json
 import os
-from datetime import date, timedelta
-from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
@@ -21,7 +19,7 @@ def load_rows(days):
         "p_complete_days": False,
     }).encode()
     req = Request(
-        f"{SUPABASE_URL}/rest/v1/rpc/get_click_report",
+        f"{SUPABASE_URL}/rest/v1/rpc/get_click_report_v2",
         data=payload,
         method="POST",
         headers={
@@ -38,12 +36,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--days", type=int, default=7)
     args = parser.parse_args()
-    rows = load_rows(args.days)
+    report = load_rows(args.days)
+    rows = report["rows"]
     total = sum(int(row.get("clicks") or 0) for row in rows)
-    print(f"CLICK REPORT | days={args.days} | unique_human_clicks={total}")
+    unknown = sum(int(row.get("unverified_clicks") or 0) for row in rows)
+    print(f"LINK REPORT | browser_navigation_signals={total} | unverified_requests={unknown}")
+    print(f"Period: {report['period_start']} <= time < {report['period_end']}")
+    print("Product/channel/day totals, not people or official Amazon Associates clicks.")
     for row in rows:
         print(
-            f"{int(row.get('clicks') or 0):>4} | "
+            f"{int(row.get('clicks') or 0):>4} navigation | "
+            f"{int(row.get('unverified_clicks') or 0):>4} unverified | "
             f"{row['channel']:<9} | {row['merchant']:<14} | {row['title']}"
         )
 
