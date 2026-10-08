@@ -1,3 +1,4 @@
+import {brandedLink} from "../_shared/share-links.mjs";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { formatClickReport } from "../_shared/click-report.mjs";
@@ -20,11 +21,7 @@ const REELS_MAX_PER_DAY=Number(env("INSTAGRAM_REELS_MAX_PER_DAY")||"2");
 const sbUrl=env("SUPABASE_URL");
 const service=env("SUPABASE_SERVICE_ROLE_KEY") || (()=>{try{return JSON.parse(env("SUPABASE_SECRET_KEYS")).default||""}catch{return ""}})();
 const sb=createClient(sbUrl,service);
-const CLICK_BASE=sbUrl+"/functions/v1/deal-click";
-function tracked(d:any,channel:string){
- const q=new URLSearchParams({deal:String(d.id),offer:String(d.offer_id),channel});
- return CLICK_BASE+"?"+q.toString();
-}
+function tracked(d:any,channel:string){return brandedLink(d,channel);}
 
 async function tg(method:string, body:any) {
   const r=await fetch(`${TG_API}/${method}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
@@ -108,7 +105,7 @@ function reelCaption(d:any){
  const repeat=isRedispatch(d);
  const gap=Number(repeat?d.redispatch_drop_percent:d.gap_percent).toFixed(2).replace(".",",");
  const discount=repeat?"Son paylaşım fiyatına göre %"+gap+" düştü":"Rakip mağazadan %"+gap+" daha ucuz";
- return "🔥 BUGÜNÜN FIRSATI\n\n"+String(d.title)+"\n\n🛒 "+String(d.merchant)+"\n🔥 "+money(d.cheapest_price)+"\n📉 "+discount+"\n\nFırsatları kaçırmamak için @anlikindirimradari hesabını takip et.\n🔗 Telegram kanalı biyografide.\n\n#işbirliği #reklam #anlikindirimradari #indirim #fırsat #alışveriş";
+ return "🔥 BUGÜNÜN FIRSATI\n\n"+String(d.title)+"\n\n🛒 "+String(d.merchant)+"\n🔥 "+money(d.cheapest_price)+"\n📉 "+discount+"\n\nFırsatları kaçırmamak için @anlikindirimradari hesabını takip et.\n🔗 Ürüne git: "+tracked(d,"instagram")+"\n🔗 Tüm fırsatlar: https://fırsatcı.com\n\n#işbirliği #reklam #anlikindirimradari #indirim #fırsat #alışveriş";
 }
 async function sendReelAssist(d:any){
  const videoUrl=sb.storage.from(BUCKET).getPublicUrl("deals/"+d.id+"/reel.mp4").data.publicUrl;

@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {brandedLink} from "../supabase/functions/_shared/share-links.mjs";
 import {caption,apiJSON,DeliveryError,deliverChannels,matchingMedia} from '../supabase/functions/publication-queue/delivery.ts';
-const d={id:'00000000-0000-0000-0000-000000000001',offer_id:'offer',title:'Ürün',merchant:'Mağaza',cheapest_price:850,competitor_price:1200,notification_reason:'redispatch_price_drop',previous_notified_price:1000};
+const d={id:'00000000-0000-0000-0000-000000000001',offer_id:'00000000-0000-0000-0000-000000000002',title:'Ürün',merchant:'Mağaza',cheapest_price:850,competitor_price:1200,notification_reason:'redispatch_price_drop',previous_notified_price:1000};
 test('all platform captions show the actual repeat price drop and their tracking channel',()=>{
  for(const channel of ['instagram','telegram','facebook']){
   const text=caption(d,'https://example.test',channel);
   assert.ok(text.includes('Önceki paylaşım fiyatı: 1.000 TL'));
   assert.ok(text.includes('%15,00 düştü'));
-  assert.ok(text.includes('channel='+channel));
+  assert.ok(text.includes('?s='+channel));
   assert.ok(text.length<=1024);
  }
 });
@@ -44,4 +45,10 @@ test('a slow Instagram response can be reconciled while an older slot cannot',()
  const row={id:'media',caption:'https://x/?deal='+d.id+'&offer=x',timestamp:'2026-10-06T10:06:00Z',media_type:'IMAGE'};
  assert.equal(matchingMedia([row],d.id,'2026-10-06T10:00:00Z').length,1);
  assert.equal(matchingMedia([row],d.id,'2026-10-06T09:30:00Z').length,0);
+});
+
+test('new branded caption can be reconciled after an uncertain Instagram response',()=>{
+ const row={id:'media',caption:caption(d,'unused','instagram'),timestamp:'2026-10-06T10:00:01Z',media_type:'IMAGE'};
+ assert.equal(matchingMedia([row],d.id,'2026-10-06T10:00:00Z').length,1);
+ assert.equal(matchingMedia([{...row,caption:brandedLink({...d,id:d.offer_id},'instagram')}],d.id,'2026-10-06T10:00:00Z').length,0);
 });

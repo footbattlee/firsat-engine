@@ -1,28 +1,23 @@
+import base64
 import os
+from uuid import UUID
 from urllib.parse import urlencode
-
 from dotenv import load_dotenv
 
 load_dotenv()
-
-SUPABASE_URL = os.getenv(
-    "SUPABASE_URL", "https://cmexmobjpeavlppmffqi.supabase.co"
-).rstrip("/")
-CLICK_TRACKING_BASE_URL = os.getenv(
-    "CLICK_TRACKING_BASE_URL",
-    f"{SUPABASE_URL}/functions/v1/deal-click",
-).strip()
-
+SHARE_ORIGIN = "https://fırsatcı.com"
+CHANNELS = {"telegram", "facebook", "instagram", "story", "whatsapp", "other"}
 
 def tracked_deal_url(data, channel):
-    """Build a non-secret redirect URL keyed to the published deal and offer."""
+    """Brand the published deal+offer pair; attribution continues in the existing tracker."""
     deal_id = str(data.get("id") or "").strip()
     offer_id = str(data.get("offer_id") or data.get("cheapest_offer_id") or "").strip()
-    if not deal_id or not offer_id:
-        raise ValueError("tracking link requires deal and offer ids")
-    safe_channel = str(channel or "other").strip().casefold()
-    if safe_channel not in {"telegram", "facebook", "instagram", "story", "whatsapp", "other"}:
-        safe_channel = "other"
-    return CLICK_TRACKING_BASE_URL + "?" + urlencode(
-        {"deal": deal_id, "offer": offer_id, "channel": safe_channel}
-    )
+    try:
+        pair = UUID(deal_id).bytes + UUID(offer_id).bytes
+    except (ValueError, AttributeError) as error:
+        raise ValueError("tracking link requires valid deal and offer UUIDs") from error
+    code = base64.urlsafe_b64encode(pair).decode("ascii").rstrip("=")
+    source = str(channel or "other").strip().casefold()
+    if source not in CHANNELS:
+        source = "other"
+    return SHARE_ORIGIN + "/f/" + code + "?" + urlencode({"s": source})

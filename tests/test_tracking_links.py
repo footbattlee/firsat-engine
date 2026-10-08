@@ -1,3 +1,5 @@
+import base64
+from uuid import UUID
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -14,19 +16,18 @@ def test_tracking_link_contains_only_ids_and_channel():
     url = tracked_deal_url(data, "telegram")
     parsed = urlsplit(url)
     query = parse_qs(parsed.query)
-    assert parsed.path.endswith("/functions/v1/deal-click")
-    assert query == {
-        "deal": [data["id"]],
-        "offer": [data["offer_id"]],
-        "channel": ["telegram"],
-    }
+    assert parsed.hostname == "fırsatcı.com"
+    code = parsed.path.removeprefix("/f/")
+    decoded = base64.urlsafe_b64decode(code + "=")
+    assert decoded == UUID(data["id"]).bytes + UUID(data["offer_id"]).bytes
+    assert query == {"s": ["telegram"]}
     assert "merchant.example" not in url
     assert "affiliate.example" not in url
 
 
 def test_unknown_channel_becomes_other():
-    data = {"id": "a", "offer_id": "b"}
-    assert parse_qs(urlsplit(tracked_deal_url(data, "unknown")).query)["channel"] == ["other"]
+    data = {"id": "11111111-1111-4111-8111-111111111111", "offer_id": "22222222-2222-4222-8222-222222222222"}
+    assert parse_qs(urlsplit(tracked_deal_url(data, "unknown")).query)["s"] == ["other"]
 
 
 def test_cloud_click_tracking_deduplicates_visitors_and_detects_preview_headers():
@@ -44,9 +45,9 @@ def test_cloud_publish_restores_story_helper_message():
 
 
 def test_story_link_keeps_its_own_channel():
-    data = {"id": "a", "offer_id": "b"}
+    data = {"id": "11111111-1111-4111-8111-111111111111", "offer_id": "22222222-2222-4222-8222-222222222222"}
     query = parse_qs(urlsplit(tracked_deal_url(data, "story")).query)
-    assert query["channel"] == ["story"]
+    assert query["s"] == ["story"]
 
 
 def test_story_helper_contains_tracked_product_link():

@@ -1,3 +1,4 @@
+import {brandedLink} from "../_shared/share-links.mjs";
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import {createClient} from 'npm:@supabase/supabase-js@2.57.4';
 import {parseHTML} from 'npm:linkedom@0.18.12';
@@ -64,7 +65,7 @@ async function candidate(id:string){
  return {id,offer_id:cheap.id,title:cp.title,merchant:merchants.find((m:any)=>m.id===cheap.merchant_id).name,
          cheapest_price:price,competitor_price:competitor,gap_percent:gap,notification_reason:d.notification_reason,previous_notified_price:d.previous_notified_price,redispatch_drop_percent:d.redispatch_drop_percent,image_url:cheap.image_url,price_checked_at:batch.completed_at};
 }
-function tracked(d:any){return url+'/functions/v1/deal-click?'+new URLSearchParams({deal:d.id,offer:d.offer_id,channel:'story'});}
+function tracked(d:any){return brandedLink(d,'story');}
 async function image(d:any){return fetchProductImage(d.image_url);}
 async function prepare(d:any,slot:string){
  const photo=await image(d);const post=await artwork(d,photo.bytes,photo.type),story=await artwork(d,photo.bytes,photo.type,true);

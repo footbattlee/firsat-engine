@@ -29,3 +29,6 @@ From the repository root:
 `node --experimental-strip-types --test tests/test_homepage.mjs`
 
 The suite covers freshness, affiliate preservation, host restrictions, manual links, Turkish price parsing, mismatched visible/schema prices, membership-only prices, stock evidence and discovery fallback.
+
+## Social sharing links
+New social captions use the Firsatci /f/[code]?s=channel route. The URL-safe code packs the exact published candidate and offer UUIDs; it contains no credentials or external destination. The browser follows the existing Supabase click tracker, which retains the real visitor IP, user agent, navigation signals, bot classification, source channel and original affiliate URL. The website does not proxy or count an extra click. HEAD probes create no events. Social links are independent of homepage price freshness, and previously published Supabase links remain valid. Instagram recovery recognizes both formats.

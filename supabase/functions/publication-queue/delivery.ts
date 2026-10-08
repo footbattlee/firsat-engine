@@ -1,10 +1,11 @@
+import {brandedLink,captionHasDeal} from "../_shared/share-links.mjs";
 import {discountPresentation} from './core.ts';
 export const channels=['story','telegram','facebook'] as const;
 export function caption(d:any,base:string,channel:string){
  const discount=discountPresentation(d);
  const money=(v:number)=>new Intl.NumberFormat('tr-TR',{maximumFractionDigits:2}).format(v)+' TL';
  const percent=new Intl.NumberFormat('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2}).format(discount.percent);
- const link=base+'/functions/v1/deal-click?'+new URLSearchParams({deal:d.id,offer:d.offer_id,channel});
+ const link=brandedLink(d,channel);
  return `🔥 FİYATZADE FIRSATI\n\n${String(d.title).slice(0,300)}\n\n🛒 ${d.merchant}\n💸 ${discount.repeat?'Önceki paylaşım fiyatı':'Rakip fiyat'}: ${money(discount.comparisonPrice)}\n🔥 Fırsat fiyatı: ${money(d.cheapest_price)}\n📉 ${discount.repeat?'Son paylaşımdan sonra %'+percent+' düştü':'Rakipten %'+percent+' daha ucuz'}\n\n🔗 Fırsata git: ${link}\n\nFiyat bilgisi son taramaya aittir; fiyat ve stok değişebilir.\n#işbirliği #reklam #indirim #fırsat`;
 }
 export class DeliveryError extends Error{
@@ -28,7 +29,7 @@ export function matchingMedia(rows:any[],id:string,slot:string){
  const when=Date.parse(slot);if(!Number.isFinite(when))return [];
  // Exact tracking parameter and publication window avoid matching an older deal.
  return rows.filter(m=>m.media_type==='IMAGE'&&
-  new RegExp('[?&]deal='+id+'(?:&|\\s|$)').test(String(m.caption||''))&&
+  captionHasDeal(m.caption,id)&&
   Date.parse(m.timestamp)>=when-5000&&Date.parse(m.timestamp)<=when+600000);
 }
 export async function deliverChannels(q:any,deps:any){
