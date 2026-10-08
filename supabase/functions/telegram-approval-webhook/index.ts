@@ -200,7 +200,7 @@ function reportDays(text:string){
  return m?Math.min(90,Math.max(1,Number(m[1]))):null;
 }
 async function clickReport(days:number,completeDays=false){
- const {data,error}=await sb.rpc("get_click_report_v2",{p_days:days,p_complete_days:completeDays});
+ const {data,error}=await sb.rpc("get_click_report_v3",{p_days:days,p_complete_days:completeDays});
  if(error)throw error;
  return formatClickReport(data);
 }

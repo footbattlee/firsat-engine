@@ -15,12 +15,19 @@ export function formatClickReport(report) {
   }
   const start = fmt.format(new Date(report.period_start));
   const end = fmt.format(new Date(report.period_end));
-  const lines = ["📊 <b>Bağlantı Açılış Raporu</b>",
+  const website = report.website;
+  const lines = ["📊 <b>Fırsatcı Ziyaret ve Tıklama Raporu</b>",
     "Dönem: <b>" + start + " – " + end + "</b> (Türkiye saati; bitiş hariç)",
+    ...(website ? ["", "<b>🌐 fırsatcı.com</b>",
+      "Ana sayfa açılışı: <b>" + Number(website.page_views || 0) + "</b>",
+      "Ana sayfadan mağazaya gidiş: <b>" + Number(website.outbound_clicks || 0) + "</b>",
+      "Belirsiz mağaza isteği: " + Number(website.unverified_outbound || 0) + " (gidiş toplamına dahil değil)",
+      "Ana sayfa sayacı, görünür sayfanın tarayıcı sinyalidir; yönlendirme linkleri ziyaret sayılmaz.",
+      "", "<b>📱 Sosyal paylaşım bağlantıları</b>"] : []),
     "👆 Tarayıcı açılış sinyali olan: <b>" + total + "</b>",
     "❔ Belirsiz istek: <b>" + uncertain + "</b> (açılış toplamına dahil değil)",
     "🤖 Bot / ön yükleme isteği: " + Number(report.bot_requests || 0) + " (hariç)",
-    "", "Kişi sayısı değildir; aynı ürün ve kanaldaki günlük tekrarlar tek sayılır.",
+    "", "Kişi sayısı değildir; aynı sayfa/ürün ve kanaldaki günlük tekrarlar tek sayılır.",
     "Belirsiz istekler insan da olabilir, otomatik bağlantı kontrolü de.",
     "Amazon satırı bizim bağlantı ölçümümüzdür; Amazon Gelir Ortaklığı verisi değildir."];
   const line = ([name, [count, unknown]]) => "• " + escapeHtml(name.slice(0,120)) + ": <b>" + count + "</b> açılış" + (unknown ? " · " + unknown + " belirsiz" : "");

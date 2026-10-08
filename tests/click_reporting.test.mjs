@@ -132,3 +132,28 @@ test("SQL report is inaccessible to anonymous and authenticated clients",()=>sql
   await db.exec("reset role");
  }
 }));
+
+// Website counters stay separate from legacy social rows.
+test("SQL website report deduplicates daily views, upgrades outbound evidence and excludes bots",()=>sqlFixture(async db=>{
+ await db.exec("create table public.homepage_deals(id text);");
+ await db.exec(readFileSync(new URL("../supabase/migrations/20261009010000_website_traffic_report.sql",import.meta.url),"utf8"));
+ const insert=async (key,type,path,kind,time="2026-10-07T12:00:00+03")=>db.query(
+ "insert into public.site_traffic_events(event_key,event_type,path,visitor_hash,request_kind,occurred_at) values($1,$2,$3,$4,$5,$6)",
+ [key.repeat(64),type,path,"a".repeat(64),kind,time]);
+ await insert("1","pageview","/","client_view");
+ await insert("2","pageview","/","client_view");
+ await insert("3","outbound","/urun/a","unverified");
+ await insert("4","outbound","/urun/a","navigation");
+ await insert("5","outbound","/urun/b","bot");
+ await insert("6","pageview","/","client_view","2026-10-08T00:00:00+03");
+ await event(db,"2026-10-07T12:00:00+03","navigation");
+ const r=(await db.query("select public.get_click_report_v3(1,true,$1) data",[asOf])).rows[0].data;
+ assert.deepEqual(r.website,{page_views:1,outbound_clicks:1,unverified_outbound:0});
+ assert.equal(r.rows[0].clicks,1);
+ for(const role of ["anon","authenticated"]){
+  await db.exec("set role "+role);
+  await assert.rejects(db.query("select * from public.site_traffic_events"),/permission denied/);
+  await assert.rejects(db.query("select public.get_click_report_v3(1,true)"),/permission denied/);
+  await db.exec("reset role");
+ }
+}));

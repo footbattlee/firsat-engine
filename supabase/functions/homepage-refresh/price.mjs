@@ -31,7 +31,7 @@ export function parsePrice(doc,slug,url){
   if(!asin||doc.querySelector('input#ASIN')?.getAttribute('value')!==asin)throw Error('product-identity-unverified');
   const stock=doc.querySelector('#availability')?.textContent?.toLowerCase()||'';
   if(!stock.includes('stokta')||/yok|değil|degil|tükendi/u.test(stock))throw Error('stock-unverified');
-  const minimum=doc.querySelector('#quantity option')?.getAttribute('value');
+  const minimum=doc.querySelector('#quantity option[value]:not([value=""])')?.getAttribute('value');
   if(minimum&&Number(minimum)>1)throw Error('minimum-quantity-condition');
   if(!doc.querySelector('#add-to-cart-button')||doc.querySelector('#add-to-cart-button')?.hasAttribute('disabled'))throw Error('purchase-unavailable');
   price=amount(doc.querySelector('#corePrice_feature_div .a-price:not(.a-text-price) .a-offscreen,#corePriceDisplay_desktop_feature_div .a-price:not(.a-text-price) .a-offscreen')?.textContent);

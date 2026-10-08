@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {parseHTML} from '../web/node_modules/linkedom/esm/index.js';
 import {amount,allowedProduct,sameProduct,parsePrice,advantage} from '../supabase/functions/homepage-refresh/price.mjs';
-import {eligible,catalogueEligible,safeDestination,validListingId} from '../web/lib/policy.ts';
+import {eligible,currentPriceEligible,catalogueEligible,safeDestination,validListingId} from '../web/lib/policy.ts';
 const now=Date.parse('2026-10-08T19:00:00Z');
 const base={title:"Test product",id:'2efce27b-bfef-41bf-9bec-6741c1b73616',status:'verified',checked_at:new Date(now-1000).toISOString(),price:400,competitor_price:600,product_url:'https://www.amazon.com.tr/dp/B0CZ47VFR1',affiliate_url:'https://www.amazon.com.tr/dp/B0CZ47VFR1?tag=anlikindirimr-21&linkCode=ll1',merchant_slug:'amazon'};
 test('fresh eligible snapshot and full affiliate query are preserved',()=>{assert.equal(eligible(base,now),true);assert.equal(safeDestination(base.affiliate_url,'amazon'),base.affiliate_url);});
@@ -23,4 +23,11 @@ test('Amazon ASIN and stock evidence are mandatory',()=>{const html='<h1 id="pro
 
 test("unverified catalogue links do not imply a current price",()=>{const row={...base,status:"unverified",attempted_at:new Date(now-1000).toISOString(),error_code:"stock-unverified"};assert.equal(catalogueEligible(row,now),true);assert.equal(eligible(row,now),false);for(const error_code of ["store-http-404","product-identity-unverified","match-no-longer-approved","variant-identity-mismatch"])assert.equal(catalogueEligible({...row,error_code},now),false);assert.equal(catalogueEligible({...row,attempted_at:new Date(now-25*3600000).toISOString()},now),false);});
 
-test("minimum quantity prices and missing buy buttons are rejected",()=>{const html='<h1>Product</h1><input id="ASIN" value="B0CZ47VFR1"><input id="add-to-cart-button"><div id="availability">Stokta</div><select id="quantity"><option value="2">2</option></select><div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">400,00 TL</span></span></div>';assert.throws(()=>parsePrice(doc(html),"amazon",base.product_url),/minimum-quantity/);assert.throws(()=>parsePrice(doc(html.replace('<input id="add-to-cart-button">','').replace('value="2"','value="1"')),"amazon",base.product_url),/purchase-unavailable/);});
+test("minimum quantity prices and missing buy buttons are rejected",()=>{const html='<h1>Product</h1><input id="ASIN" value="B0CZ47VFR1"><input id="add-to-cart-button"><div id="availability">Stokta</div><select id="quantity"><option value="">Adet sec</option><option value="2">2</option></select><div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">400,00 TL</span></span></div>';assert.throws(()=>parsePrice(doc(html),"amazon",base.product_url),/minimum-quantity/);assert.throws(()=>parsePrice(doc(html.replace('<input id="add-to-cart-button">','').replace('value="2"','value="1"')),"amazon",base.product_url),/purchase-unavailable/);});
+
+test("a fresh verified purchase price never invents a rival discount",()=>{
+ const row={...base,status:"unverified",price_checked_at:new Date(now-1000).toISOString(),competitor_price:null,error_code:"store-http-403"};
+ assert.equal(currentPriceEligible(row,now),true);assert.equal(eligible(row,now),false);
+ for(const patch of [{price_checked_at:null},{price_checked_at:new Date(now-3600000).toISOString()},{price_checked_at:new Date(now+60000).toISOString()},{status:"ended"},{price:0},{expires_at:new Date(now-1000).toISOString()}])
+  assert.equal(currentPriceEligible({...row,...patch},now),false);
+});

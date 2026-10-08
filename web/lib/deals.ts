@@ -1,4 +1,4 @@
-import { eligible, catalogueEligible, safeImage, validListingId, type Snapshot } from "./policy";
+import { eligible, currentPriceEligible, catalogueEligible, safeImage, validListingId, type Snapshot } from "./policy";
 const SUPABASE_URL = (process.env.SUPABASE_URL || "https://cmexmobjpeavlppmffqi.supabase.co").replace(/\/$/, "");
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 export type Deal = {
@@ -26,16 +26,16 @@ export async function getDeals(): Promise<Deal[]> {
   snapshots("select=*&status=eq.verified&checked_at=gt." + encodeURIComponent(cutoff) + "&order=checked_at.desc&limit=90"),
   snapshots("select=*&status=eq.unverified&order=attempted_at.desc&limit=90"),
  ]);
- const rows=[...new Map([...verified.filter(row=>eligible(row)),...discovery.filter(row=>catalogueEligible(row))].map(row=>[String(row.offer_id || row.manual_id || row.id),row])).values()];
+ const rows=[...new Map([...verified.filter(row=>eligible(row)),...discovery.filter(row=>currentPriceEligible(row)||catalogueEligible(row))].map(row=>[String(row.offer_id || row.manual_id || row.id),row])).values()];
  return rows.map(row=>{
-  const fresh=eligible(row),price=fresh?Number(row.price):null;
+  const fresh=eligible(row),current=currentPriceEligible(row),price=fresh||current?Number(row.price):null;
   const rival=fresh&&!row.manual_id?Number(row.competitor_price):null;
   return {
    id:String(row.id),title:String(row.title),brand:String(row.brand||""),price,
    competitorPrice:rival,gapPercent:price!==null&&rival?Math.round((rival-price)/rival*10000)/100:null,
    merchant:String(row.merchant_name),merchantSlug:String(row.merchant_slug),
    competitorMerchant:fresh?String(row.competitor_name||""):"",imageUrl:safeImage(row.image_url),
-   href:(fresh?"/go/":"/urun/")+encodeURIComponent(String(row.id)),checkedAt:fresh?String(row.checked_at):null,
+   href:(fresh?"/go/":"/urun/")+encodeURIComponent(String(row.id)),checkedAt:fresh?String(row.checked_at):current?String(row.price_checked_at):null,
    manual:Boolean(row.manual_id),affiliate:Boolean(row.affiliate_url),
   };
  });

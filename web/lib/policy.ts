@@ -36,6 +36,14 @@ export function validListingId(id: string): boolean {
  return /^(manual-)?[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 }
 
+// A verified purchase price does not itself prove a competitor discount.
+export function currentPriceEligible(row:Snapshot,now=Date.now()):boolean {
+ const checked=Date.parse(String(row.price_checked_at||""));
+ const expiry=row.expires_at?Date.parse(String(row.expires_at)):Infinity;
+ return row.status!=="ended" && Number.isFinite(checked) && checked<=now+5000 && now-checked<MAX_AGE_MS
+  && expiry>now && Number.isFinite(Number(row.price)) && Number(row.price)>0
+  && !!String(row.title||"").trim() && !!safeDestination(row.affiliate_url||row.product_url,row.merchant_slug);
+}
 export function catalogueEligible(row: Snapshot, now = Date.now()): boolean {
  const attempted=Date.parse(String(row.attempted_at||""));
  const expiry=row.expires_at?Date.parse(String(row.expires_at)):Infinity;

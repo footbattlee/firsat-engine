@@ -19,7 +19,7 @@ def load_rows(days):
         "p_complete_days": False,
     }).encode()
     req = Request(
-        f"{SUPABASE_URL}/rest/v1/rpc/get_click_report_v2",
+        f"{SUPABASE_URL}/rest/v1/rpc/get_click_report_v3",
         data=payload,
         method="POST",
         headers={
@@ -37,6 +37,8 @@ def main():
     parser.add_argument("--days", type=int, default=7)
     args = parser.parse_args()
     report = load_rows(args.days)
+    website = report.get("website") or {}
+    print(f"WEBSITE | homepage_daily_opens={website.get('page_views', 0)} | store_daily_clicks={website.get('outbound_clicks', 0)} | unverified_outbound={website.get('unverified_outbound', 0)}")
     rows = report["rows"]
     total = sum(int(row.get("clicks") or 0) for row in rows)
     unknown = sum(int(row.get("unverified_clicks") or 0) for row in rows)

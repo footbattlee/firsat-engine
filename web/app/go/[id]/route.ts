@@ -1,7 +1,9 @@
 import { getSnapshot } from "../../../lib/deals";
 import { eligible, safeDestination } from "../../../lib/policy";
+import { recordTraffic } from "../../../lib/traffic";
 export const dynamic = "force-dynamic";
-export async function GET(_req: Request, context: { params: Promise<{ id: string }> }) {
+export const runtime = "nodejs";
+export async function GET(req: Request, context: { params: Promise<{ id: string }> }) {
  const { id } = await context.params;
  try {
   const row = await getSnapshot(id);
@@ -11,6 +13,7 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
   const destination = safeDestination(row.affiliate_url || row.product_url, row.merchant_slug);
   if (!destination) return new Response("Bağlantı kullanılamıyor", { status: 404 });
   // No stripping/rebuilding of affiliate query parameters. No storefront fetch at click time.
+  await recordTraffic(req,"outbound","/urun/"+id,id,String(row.merchant_name));
   return new Response(null, { status: 302, headers: { Location: destination, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex" } });
  } catch { return new Response("Fiyat kontrolü şu anda kullanılamıyor. Lütfen ana sayfadan tekrar deneyin.", { status: 503, headers: { "Cache-Control": "no-store" } }); }
 }

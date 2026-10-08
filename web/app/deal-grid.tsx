@@ -28,12 +28,12 @@ export function DealGrid({ deals }: { deals: Deal[] }) {
   </div>
   {shown.length ? <div className="grid">{shown.map(deal => <article className="dealCard" key={deal.id}>
    <div className="productVisual"><DealImage key={deal.imageUrl} src={deal.imageUrl} title={deal.title} />
-    <span className="cardBadge">{deal.gapPercent !== null ? "%" + deal.gapPercent.toFixed(0) + " daha ucuz" : deal.price !== null ? "Editör seçimi" : "Fiyat mağazada"}</span>
+    <span className="cardBadge">{deal.gapPercent !== null ? "%" + deal.gapPercent.toFixed(0) + " daha ucuz" : deal.price !== null ? "Fiyat kontrol edildi" : "Fiyat mağazada"}</span>
    </div>
    <div className="cardBody"><div className={"merchant " + deal.merchantSlug}><span aria-hidden="true">●</span>{deal.merchant}</div>
     <h3>{deal.title}</h3>
     {deal.price !== null ? <div className="price">{money.format(deal.price)}</div> : <div className="storePrice">Fiyatı mağazada gör</div>}
-    {deal.competitorPrice !== null ? <p className="rival">{deal.competitorMerchant}: <b>{money.format(deal.competitorPrice)}</b></p> : <p className="rival">{deal.price !== null ? "Fiyatı kontrol edilen editör seçimi" : "Güncel fiyatı henüz doğrulayamadık."}</p>}
+    {deal.competitorPrice !== null ? <p className="rival">{deal.competitorMerchant}: <b>{money.format(deal.competitorPrice)}</b></p> : <p className="rival">{deal.price !== null ? "Güncel mağaza fiyatı; indirim karşılaştırması doğrulanmadı." : "Güncel fiyatı henüz doğrulayamadık."}</p>}
     <a className="dealCta" href={deal.href} target="_blank" rel="nofollow sponsored noopener">{deal.merchant}’da gör <span aria-hidden="true">↗</span></a>
     <div className="checked">{deal.checkedAt ? <><span aria-hidden="true">✓</span> Kontrol: <time dateTime={deal.checkedAt}>{time.format(new Date(deal.checkedAt))}</time></> : "Fiyat ve stok için mağazayı kontrol et."}</div>
    </div>

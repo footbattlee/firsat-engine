@@ -36,14 +36,15 @@ Deno.serve(async(req:Request)=>{
   const [candidates,manual,previous]=await Promise.all([
    data(sb.from('deal_candidates').select('*').eq('status','candidate').gte('gap_percent',15).lt('gap_percent',70).order('gap_percent',{ascending:false}).limit(60)),
    data(sb.from('homepage_manual_deals').select('*').eq('active',true).gt('expires_at',new Date().toISOString()).limit(30)),
-   data(sb.from('homepage_deals').select('id,attempted_at')),
+   data(sb.from('homepage_deals').select('id,attempted_at,price_checked_at,status')),
   ]);
   const active=new Set([...candidates.map((d:any)=>d.id),...manual.map((d:any)=>'manual-'+d.id)]);
   const removed=previous.filter((d:any)=>!active.has(d.id)).map((d:any)=>d.id);
   if(removed.length)await data(sb.from('homepage_deals').update({status:'ended',error_code:'listing-no-longer-active'}).in('id',removed));
   const last=new Map(previous.map((d:any)=>[d.id,Date.parse(d.attempted_at)]));
+  const fresh=new Set(previous.filter((d:any)=>d.status!=='ended'&&Date.parse(d.price_checked_at)>Date.now()-55*60000).map((d:any)=>d.id));
   const tasks=[...candidates.map((d:any)=>({id:d.id,d,manual:false})),...manual.map((d:any)=>({id:'manual-'+d.id,d,manual:true}))]
-   .filter((t:any)=>!body.candidate_id||t.id===body.candidate_id)
+   .filter((t:any)=>(!body.candidate_id||t.id===body.candidate_id)&&!fresh.has(t.id))
    .sort((a:any,b:any)=>Number(last.get(a.id)||0)-Number(last.get(b.id)||0)).slice(0,9);
   const ids=[...new Set(tasks.filter((t:any)=>!t.manual).flatMap((t:any)=>[t.d.cheapest_offer_id,t.d.competitor_offer_id]))];
   const [offers,merchants,products]=await Promise.all([
@@ -67,7 +68,7 @@ Deno.serve(async(req:Request)=>{
    const m:any=t.manual?merchants.find((m:any)=>m.slug===d.merchant_slug):mm.get(cheap?.merchant_id);
    const p:any=t.manual?d:pm.get(d.canonical_product_id);
    if(!cheap||!m||!p){results.push({id:t.id,status:'missing-data'});await data(sb.from('homepage_deals').upsert({id:t.id,candidate_id:t.manual?null:d.id,manual_id:t.manual?d.id:null,offer_id:cheap?.id||null,title:p?.title||d.title||'Unavailable listing',merchant_slug:m?.slug||'unknown',merchant_name:m?.name||'Unknown',product_url:cheap?.product_url||'',status:'unverified',error_code:'missing-data',checked_at:null,attempted_at:new Date().toISOString()}));continue;}
-   const row:any={id:t.id,candidate_id:t.manual?null:d.id,manual_id:t.manual?d.id:null,offer_id:t.manual?null:cheap.id,title:p.title,brand:p.brand||'',merchant_slug:m.slug,merchant_name:m.name,product_url:cheap.product_url,affiliate_url:cheap.affiliate_url||null,image_url:cheap.image_url||null,expires_at:t.manual?d.expires_at:null,attempted_at:new Date().toISOString(),status:'unverified',checked_at:null};
+   const row:any={id:t.id,candidate_id:t.manual?null:d.id,manual_id:t.manual?d.id:null,offer_id:t.manual?null:cheap.id,title:p.title,brand:p.brand||'',merchant_slug:m.slug,merchant_name:m.name,product_url:cheap.product_url,affiliate_url:cheap.affiliate_url||null,image_url:cheap.image_url||null,expires_at:t.manual?d.expires_at:null,attempted_at:new Date().toISOString(),status:'unverified',checked_at:null,price_checked_at:null};
    try{
     if(!t.manual){
      const rival:any=om.get(d.competitor_offer_id);
@@ -75,16 +76,18 @@ Deno.serve(async(req:Request)=>{
      if(!cv||!rv||!approved.has(d.canonical_product_id+':'+cv.product_id)||!approved.has(d.canonical_product_id+':'+rv.product_id))throw Error('match-no-longer-approved');
      if(cv.gtin&&rv.gtin&&cv.gtin!==rv.gtin)throw Error('variant-identity-mismatch');
     }
-    const current=await check(cheap.product_url,m.slug,body.debug===true);row.price=current.price;row.title=current.title;
+    const current=await check(cheap.product_url,m.slug,body.debug===true);row.price=current.price;row.title=current.title;row.price_checked_at=new Date().toISOString();
     if(!t.manual){
      const rival:any=om.get(d.competitor_offer_id),rm:any=mm.get(rival?.merchant_id);
      if(!rival||!rm||rm.id===m.id)throw Error('competitor-unverified');
      const live=await check(rival.product_url,rm.slug,body.debug===true);row.competitor_price=live.price;row.competitor_name=rm.name;
-     row.status=advantage(current.price,live.price)===null?'ended':'verified';
-     if(row.status==='ended')row.error_code='advantage-lost';
+     row.status=advantage(current.price,live.price)===null?'unverified':'verified';
+     if(row.status==='unverified')row.error_code='advantage-lost';
     }else row.status='verified';
     row.checked_at=new Date().toISOString();row.error_code=row.error_code||null;
    }catch(e){row.error_code=e instanceof Error?e.message.slice(0,120):'check-failed';if(body.debug===true)results.push({id:t.id,diagnostic:e instanceof Error?e.message:'failed'});}
+   const latest=await data(sb.from('homepage_deals').select('price_checked_at').eq('id',t.id).maybeSingle());
+   if(Date.parse(latest?.price_checked_at)>Date.parse(row.attempted_at))continue;
    await data(sb.from('homepage_deals').upsert(row));results.push({id:t.id,status:row.status,price:row.price||null,error:row.error_code});
   }}
   await Promise.all([worker(),worker(),worker()]);
