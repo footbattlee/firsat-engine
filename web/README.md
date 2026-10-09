@@ -4,18 +4,18 @@ Run `pnpm install --ignore-scripts`, then `pnpm build` or `pnpm dev`.
 Server-only environment: `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Never use a NEXT_PUBLIC service key.
 
 ## Price and link rules
-- The homepage reads every active approved listing through private website_catalogue; prices still require a fresh homepage_deals snapshot.
-- Verified prices expire after 60 minutes; manual entries also expire at their specified time.
-- Automatic price comparisons require two currently verified stores, approved product matches, and a 15%–69.99% advantage.
-- Competitor prices are labelled as competitor prices, never as the product's previous price.
-- Store access failures show product discovery cards with no price or discount promise. Identity failures, removed listings, HTTP 404, and expired entries are hidden. Discovery entries expire after 24 hours without a refresh attempt.
-- Price-based buttons use `/go/[id]`, which checks freshness before redirecting.
-- Discovery buttons use `/urun/[id]`; these promise only a store product link.
-- Both routes preserve the original affiliate URL and query parameters, restrict merchant hosts and reject unsafe destinations.
+- The homepage reads all active approved listings through the private website_market_catalogue RPC. No 60-product cap; the UI paginates 24 cards.
+- The default opportunity feed only shows verified purchase prices with a 15%–69.99% daily drop or verified competitor advantage, plus verified manual entries. The checked-price tab and full catalogue remain accessible.
+- Purchase checks expire after 6 hours. Historical scan prices up to 7 days old only appear as dated records in the full catalogue; they never imply a current buy price.
+- Daily price drops compare the same offer against its latest in-stock pipeline record from an earlier Istanbul calendar day, within 7 days. Competitor comparisons require two independently verified offers at different merchants; the two bases have separate labels.
+- website_offer_checks retains independent purchase checks even when a rival check fails. Temporary access errors retain the original successful check timestamp; stock/identity/price verification failures disable that check. Offer URL changes and newer out-of-stock daily records invalidate it.
+- Broader comparisons only include approved same-variant matches. Shipping is explicitly unverified; coupon, minimum-quantity and member-only prices are not treated as standard purchase prices.
+- Product details use /urun-detay/[id]; product links use /urun/[id] and exact matched store offers use /magaza/[id]?offer=... . The legacy /go/[id] route retains its older stricter snapshot freshness rule.
+- Outbound routes preserve the full original affiliate URL and query parameters, restrict merchant hosts and reject unsafe destinations.
 - Stored non-Amazon links currently have no affiliate attribution. Manual Hepsiburada affiliate links are supported; they must be supplied by the owner.
 
 ## Refresh
-Deploy `supabase/functions/homepage-refresh`, apply `homepage_deals.sql`, and then `homepage_schedule.sql`.
+Deploy `supabase/functions/homepage-refresh`, apply `homepage_deals.sql`, apply website_catalogue.sql and website_market.sql, and then `homepage_schedule.sql`.
 The private worker checks nine listings per call, three in parallel; a five-minute database schedule rotates through all active candidates and manual entries. The browser refreshes its listing once per minute while visible.
 Authentication uses the existing private publication token from Vault. Public/anonymous calls cannot refresh prices or write data.
 
@@ -44,7 +44,7 @@ Görev kaçırılan gece saatlerini telafi etmez ve aynı anda ikinci çalışma
 - Doğrudan erişim yetmezse mevcut Chromium ile normal ürün sayfası okunur.
 - Ortak `homepage-refresh/price.mjs` fiyat, ürün kimliği, stok, minimum adet ve kupon kurallarını uygular.
 - Alış fiyatı tek başına doğrulandıysa fiyat gösterilir; rakip karşılaştırması doğrulanmadan indirim rozeti verilmez.
-- Bir saati geçen fiyat gizlenir. Bulut kontrolü 55 dakikadan yeni yerel fiyatı ezmez.
+- Altı saati geçen doğrulanmış fiyat fırsat vitrininden çıkar; günlük arama fiyatı katalogda tarihli geçmiş kayıt olarak kalır. Bulut kontrolü 55 dakikadan yeni yerel fiyatı ezmez.
 - Tekrar kurulum: `powershell -File install_homepage_schedule.ps1`.
 - Salt ön izleme: `.venv\\Scripts\\python.exe refresh_homepage.py --limit 6`.
 - Son sonuç: `logs/homepage-refresh-last.json`; görev çıktıları: `logs/homepage-*.log`.
@@ -64,8 +64,16 @@ Rapor işlevi özel Vault anahtarıyla çağrılır; Reels dosyası silmez.
 
 ## Full catalogue and product pages
 
-Apply supabase/website_catalogue.sql with the database migration tool. All three RPCs are service-role-only; no public database grants are added.
+Apply supabase/website_catalogue.sql and supabase/website_market.sql with the database migration tool. All RPCs and purchase checks are service-role-only; no public database grants are added.
 
 The home lists every active approved candidate, with 24 cards per UI page, title/brand search, category and store filters. Categories use existing category labels plus conservative title rules; unknown products stay in Other. Category assignment is a display aid and never changes matching or collectors.
 
 /urun-detay/[id] shows approved matching offers, recorded scan prices with timestamps, and daily history. Only a fresh purchase-price snapshot is labeled current. The history reads existing price_history, takes the last in-stock record per offer per Istanbul day, and does not fill missing days or write half-hour checks. Offers with a different known GTIN, color, size or capacity are excluded from the detail comparison. /magaza/[id]?offer=... validates membership and redirects to the original affiliate URL with website outbound tracking.
+
+## Official brochures
+
+/brosurler and the homepage shortcut link to official BİM, A101, ŞOK and Migros sources. Server-side source fetches revalidate hourly and do not require the PC to stay awake. Dated past campaigns are filtered out; current and near-future brochures are distinguished. A source with unavailable or unparseable dates uses its official landing page without an invented date. Only observed official images/PDF links are shown, and brochure links have no invented affiliate attribution.
+
+## Catalogue verification
+
+Run node --experimental-strip-types --test tests/test_homepage.mjs tests/market-price.test.mjs tests/brochures.test.mjs tests/website_catalogue.test.mjs tests/branded_links.test.mjs tests/site_traffic.test.mjs. The SQL suite uses QUEUE_SQL_TEST_RUNTIME pointing to a local PGlite test runtime. It checks approved variant identity, full catalogue pagination, purchase-price fallback, daily history, out-of-order observations, newer stock evidence, and private permissions.

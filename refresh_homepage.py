@@ -170,10 +170,20 @@ async def refresh(args):
                         raise ValueError(str(initial)[:100])
                     finally:
                         await page.close()
-        async def live(url,slug):
-            key=(url,slug)
-            if key not in cache:
-                cache[key]=asyncio.create_task(check(url,slug))
+        async def live(offer,slug):
+            url=offer['product_url']; key=(url,slug)
+            async def observed():
+                started_at=utcnow()
+                try:
+                    result=await check(url,slug)
+                    if args.apply and offer.get('id'):
+                        await asyncio.to_thread(api,'rpc/website_save_offer_check',row={'p_offer_id':offer['id'],'p_product_url':url,'p_observed_at':started_at,'p_price':result['price']})
+                    return result
+                except Exception as e:
+                    if args.apply and offer.get('id'):
+                        await asyncio.to_thread(api,'rpc/website_save_offer_check',row={'p_offer_id':offer['id'],'p_product_url':url,'p_observed_at':started_at,'p_error':str(e)[:120]})
+                    raise
+            if key not in cache: cache[key]=asyncio.create_task(observed())
             return await cache[key]
         sem=asyncio.Semaphore(3)
         async def one(t):
@@ -192,21 +202,25 @@ async def refresh(args):
                 try:
                     if not t['valid']:
                         raise ValueError('match-no-longer-approved')
-                    current=await live(cheap['product_url'],m['slug'])
-                    row.update(price=current['price'],title=current['title'],price_checked_at=utcnow())
+                    errors=[]; current=None; other=None
+                    try:
+                        current=await live(cheap,m['slug'])
+                        row.update(price=current['price'],title=current['title'],price_checked_at=utcnow())
+                    except Exception as e: errors.append(str(e))
                     if t['rival']:
                         rival=t['rival']; rm=merchants.get(rival['merchant_id'])
-                        if not rm or rm['id']==m['id']:
-                            raise ValueError('competitor-unverified')
-                        other=await live(rival['product_url'],rm['slug'])
-                        gap=(other['price']-current['price'])/other['price']*100
-                        row.update(competitor_price=other['price'],competitor_name=rm['name'])
-                        # A current price without an advantage remains discoverable, with no discount badge.
+                        if not rm or rm['id']==m['id']: errors.append('competitor-unverified')
+                        else:
+                            try:
+                                other=await live(rival,rm['slug'])
+                                row.update(competitor_price=other['price'],competitor_name=rm['name'])
+                            except Exception as e: errors.append(str(e))
+                    if current and (not t['rival'] or other):
+                        gap=(other['price']-current['price'])/other['price']*100 if other else 15
                         row['status']='verified' if 15<=gap<70 else 'unverified'
                         row['error_code']=None if row['status']=='verified' else 'advantage-lost'
-                    else:
-                        row['status']='verified'
-                    row['checked_at']=utcnow()
+                        row['checked_at']=utcnow()
+                    elif errors: row['error_code']=errors[0][:120]
                 except Exception as e:
                     row['error_code']=str(e)[:120] or 'check-failed'
                 if args.apply:

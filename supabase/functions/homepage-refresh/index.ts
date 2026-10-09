@@ -33,6 +33,17 @@ async function check(url:string,slug:string,debug=false){
  }
  throw Error('redirect-limit');
 }
+async function observe(offer:any,slug:string,debug=false){
+ const observedAt=new Date().toISOString();
+ try{
+  const result=await check(offer.product_url,slug,debug);
+  if(offer.id)await data(sb.rpc('website_save_offer_check',{p_offer_id:offer.id,p_product_url:offer.product_url,p_observed_at:observedAt,p_price:result.price}));
+  return result;
+ }catch(e){
+  if(offer.id)await data(sb.rpc('website_save_offer_check',{p_offer_id:offer.id,p_product_url:offer.product_url,p_observed_at:observedAt,p_error:e instanceof Error?e.message.slice(0,120):'check-failed'}));
+  throw e;
+ }
+}
 Deno.serve(async(req:Request)=>{
  if(req.method!=='POST')return new Response('method not allowed',{status:405});
  const token=req.headers.get('x-publication-queue-token')||'';
@@ -51,7 +62,7 @@ Deno.serve(async(req:Request)=>{
   const last=new Map(previous.map((d:any)=>[d.id,Date.parse(d.attempted_at)]));
   const fresh=new Set(previous.filter((d:any)=>d.status!=='ended'&&Date.parse(d.price_checked_at)>Date.now()-55*60000).map((d:any)=>d.id));
   const tasks=[...candidates.map((d:any)=>({id:d.id,d,manual:false})),...manual.map((d:any)=>({id:'manual-'+d.id,d,manual:true}))]
-   .filter((t:any)=>(!body.candidate_id||t.id===body.candidate_id)&&!fresh.has(t.id))
+   .filter((t:any)=>(!body.candidate_id||t.id===body.candidate_id)&&!fresh.has(t.id)&& (body.candidate_id||Date.now()-Number(last.get(t.id)||0)>30*60000))
    .sort((a:any,b:any)=>Number(last.get(a.id)||0)-Number(last.get(b.id)||0)).slice(0,9);
   const ids=[...new Set(tasks.filter((t:any)=>!t.manual).flatMap((t:any)=>[t.d.cheapest_offer_id,t.d.competitor_offer_id]))];
   const [offers,merchants,products]=await Promise.all([
@@ -83,15 +94,17 @@ Deno.serve(async(req:Request)=>{
      if(!cv||!rv||!approved.has(d.canonical_product_id+':'+cv.product_id)||!approved.has(d.canonical_product_id+':'+rv.product_id))throw Error('match-no-longer-approved');
      if(cv.gtin&&rv.gtin&&cv.gtin!==rv.gtin)throw Error('variant-identity-mismatch');
     }
-    const current=await check(cheap.product_url,m.slug,body.debug===true);row.price=current.price;row.title=current.title;row.price_checked_at=new Date().toISOString();
+    let current:any=null,other:any=null;const errors:string[]=[];
+    try{current=await observe(cheap,m.slug,body.debug===true);row.price=current.price;row.title=current.title;row.price_checked_at=new Date().toISOString();}catch(e){errors.push(e instanceof Error?e.message:'check-failed');}
     if(!t.manual){
      const rival:any=om.get(d.competitor_offer_id),rm:any=mm.get(rival?.merchant_id);
-     if(!rival||!rm||rm.id===m.id)throw Error('competitor-unverified');
-     const live=await check(rival.product_url,rm.slug,body.debug===true);row.competitor_price=live.price;row.competitor_name=rm.name;
-     row.status=advantage(current.price,live.price)===null?'unverified':'verified';
-     if(row.status==='unverified')row.error_code='advantage-lost';
-    }else row.status='verified';
-    row.checked_at=new Date().toISOString();row.error_code=row.error_code||null;
+     if(!rival||!rm||rm.id===m.id)errors.push('competitor-unverified');
+     else try{other=await observe(rival,rm.slug,body.debug===true);row.competitor_price=other.price;row.competitor_name=rm.name;}catch(e){errors.push(e instanceof Error?e.message:'check-failed');}
+    }
+    if(current&&(t.manual||other)){
+     row.status=t.manual||advantage(current.price,other.price)!==null?'verified':'unverified';
+     row.error_code=row.status==='verified'?null:'advantage-lost';row.checked_at=new Date().toISOString();
+    }else row.error_code=errors[0]?.slice(0,120)||'check-failed';
    }catch(e){row.error_code=e instanceof Error?e.message.slice(0,120):'check-failed';if(body.debug===true)results.push({id:t.id,diagnostic:e instanceof Error?e.message:'failed'});}
    const latest=await data(sb.from('homepage_deals').select('price_checked_at').eq('id',t.id).maybeSingle());
    if(Date.parse(latest?.price_checked_at)>Date.parse(row.attempted_at))continue;

@@ -6,7 +6,7 @@ import {join} from "node:path";
 import {categoryFor} from "../web/lib/categories.ts";
 import {activeCatalogueEligible,currentPriceEligible} from "../web/lib/policy.ts";
 test("category shortcuts distinguish vitamins from electronics and school from cleaning",()=>{
- for(const [title,expected] of [["Redoxon Üçlü Etki 30 Efervesan Tablet","saglik"],["Huawei FreeBuds SE 4 ANC","elektronik"],["Stanley AeroLight Termos","ev-mutfak"],["M5 Kablosuz Göğüs Pompası","anne-bebek"],["Bouncy Blush Allık","kozmetik-bakim"],["C Vitaminli Fondöten","kozmetik-bakim"],["Power Bank 10000MAH","elektronik"],["Türkiye Atlası","kitap-okul"],["Fotokopi Kağıdı 500 Adet","kitap-okul"]])
+ for(const [title,expected] of [["Redoxon Üçlü Etki 30 Efervesan Tablet","saglik"],["Huawei FreeBuds SE 4 ANC","elektronik"],["Gaming Oyuncu Kulaklığı","elektronik"],["Epson Yazıcı Tarayıcı Fotokopi","elektronik"],["Stanley AeroLight Termos","ev-mutfak"],["Karaca Elica Kase 14 cm","ev-mutfak"],["Silen Tuvalet Kağıdı 32 Rulo","supermarket"],["M5 Kablosuz Göğüs Pompası","anne-bebek"],["Bouncy Blush Allık","kozmetik-bakim"],["C Vitaminli Fondöten","kozmetik-bakim"],["Power Bank 10000MAH","elektronik"],["Türkiye Atlası","kitap-okul"],["Fotokopi Kağıdı 500 Adet","kitap-okul"]])
  assert.equal(categoryFor(title),expected);
 });
 test("an active catalogue link never turns a stale stored price into a current price",()=>{
@@ -32,7 +32,7 @@ test("private catalogue has no 60 cap; daily history and comparison respect offe
  create table product_matches(canonical_product_id uuid,product_id uuid,status text);
  create table deal_candidates(id uuid primary key,canonical_product_id uuid,cheapest_offer_id uuid,competitor_offer_id uuid,status text,detected_at timestamptz);
  create table homepage_manual_deals(id uuid,title text,brand text,product_url text,affiliate_url text,image_url text,merchant_slug text,active bool,expires_at timestamptz);
- create table homepage_deals(id text,offer_id uuid,status text,title text,image_url text,price numeric,competitor_price numeric,competitor_name text,checked_at timestamptz,price_checked_at timestamptz,attempted_at timestamptz,error_code text);
+ create table homepage_deals(id text,offer_id uuid,product_url text,status text,title text,image_url text,price numeric,competitor_price numeric,competitor_name text,checked_at timestamptz,price_checked_at timestamptz,attempted_at timestamptz,error_code text);
  create table price_history(id bigint generated always as identity,offer_id uuid,price numeric,in_stock bool,checked_at timestamptz);
  `);
  await db.query("insert into canonical_products values($1,'Product','Brand',true)",[ids[0]]);
@@ -44,6 +44,7 @@ test("private catalogue has no 60 cap; daily history and comparison respect offe
  for(let i=0;i<101;i++)await db.query("insert into deal_candidates values($1,$2,$3,$4,'candidate',now())",["10000000-0000-4000-8000-"+String(i).padStart(12,"0"),ids[0],ids[5],ids[6]]);
  await db.query("insert into price_history(offer_id,price,in_stock,checked_at) values($1,410,true,date_trunc('day',now())-interval '1 day'+interval '10 hours'),($1,400,true,date_trunc('day',now())-interval '1 day'+interval '11 hours'),($1,1,false,date_trunc('day',now())-interval '1 day'+interval '12 hours'),($2,10,true,now()-interval '1 day')",[ids[5],ids[7]]);
  await db.exec(readFileSync(new URL("../supabase/website_catalogue.sql",import.meta.url),"utf8"));
+ await db.exec(readFileSync(new URL("../supabase/website_market.sql",import.meta.url),"utf8"));
  const listing="10000000-0000-4000-8000-000000000000";
  assert.equal((await db.query("select count(*)::int n from website_catalogue()")).rows[0].n,101);
  const offers=(await db.query("select x from website_product_offers($1) x",[listing])).rows.map(r=>r.x);
@@ -51,6 +52,29 @@ test("private catalogue has no 60 cap; daily history and comparison respect offe
  const history=(await db.query("select x from website_price_history($1) x",[listing])).rows.map(r=>r.x);
  assert.equal(history.length,1);assert.equal(history[0].price,400);assert.equal(history[0].offer_id,ids[5]);
  assert.equal((await db.query("select count(*)::int n from website_catalogue('not-a-listing')")).rows[0].n,0);
+ await db.query("select website_save_offer_check($1,$2,now(),$3,null)",[ids[6],"https://www.n11.com/urun/test",550]);
+ let market=(await db.query("select x from website_market_catalogue($1) x",[listing])).rows[0].x;
+ assert.equal(market.price,550);assert.equal(market.merchant_slug,"n11");assert.equal(market.offer_id,ids[6]);assert.equal(market.offer_count,2);
+ await db.query("select website_save_offer_check($1,$2,now(),$3,null)",[ids[5],"https://www.amazon.com.tr/dp/B08S7QYCKQ",350]);
+ await db.query("select website_save_offer_check($1,$2,now(),null,'store-http-403')",[ids[5],"https://www.amazon.com.tr/dp/B08S7QYCKQ"]);
+ market=(await db.query("select x from website_market_catalogue($1) x",[listing])).rows[0].x;
+ assert.equal(market.price,350);assert.equal(market.competitor_price,550);assert.equal(market.old_price,400);
+ await db.query("select website_save_offer_check($1,$2,now()-interval '30 seconds',$3,null)",[ids[5],"https://www.amazon.com.tr/dp/B08S7QYCKQ",99]);
+ assert.equal((await db.query("select x from website_market_catalogue($1) x",[listing])).rows[0].x.price,350);
+ await db.query("update offers set in_stock=null,last_checked_at=now()+interval '1 second' where id=$1",[ids[5]]);
+ assert.equal((await db.query("select x from website_market_catalogue($1) x",[listing])).rows[0].x.price,350);
+ assert.equal((await db.query("select x from website_market_offers($1) x",[listing])).rows.find(r=>r.x.id===ids[5]).x.live_price,350);
+ await db.query("update offers set in_stock=false where id=$1",[ids[5]]);
+ assert.equal((await db.query("select x from website_market_catalogue($1) x",[listing])).rows[0].x.price,550);
+ assert.equal((await db.query("select x from website_market_offers($1) x",[listing])).rows.find(r=>r.x.id===ids[5]).x.live_price,null);
+ await db.query("update offers set in_stock=true,last_checked_at=now() where id=$1",[ids[5]]);
+ await assert.rejects(()=>db.query("select website_save_offer_check($1,$2,now(),350,null)",[ids[5],"https://www.amazon.com.tr/dp/CHANGED"]));
+
+ await db.query("select website_save_offer_check($1,$2,now(),null,'stock-unverified')",[ids[5],"https://www.amazon.com.tr/dp/B08S7QYCKQ"]);
+ market=(await db.query("select x from website_market_catalogue($1) x",[listing])).rows[0].x;assert.equal(market.price,550);
+ assert.equal((await db.query("select count(*)::int n from price_history")).rows[0].n,4);
+ const secure=(await db.query("select has_function_privilege('anon','website_save_offer_check(uuid,text,timestamptz,numeric,text)','execute') anon,has_function_privilege('anon','website_market_catalogue(text)','execute') catalogue")).rows[0];assert.equal(secure.anon,false);assert.equal(secure.catalogue,false);
+
  for(const name of ["website_catalogue","website_product_offers","website_price_history"]){
  const result=await db.query("select has_function_privilege('anon',$1,'execute') anon,has_function_privilege('service_role',$1,'execute') service",[name+"(text)"]);
  assert.equal(result.rows[0].anon,false);assert.equal(result.rows[0].service,true);

@@ -2,7 +2,7 @@ import Link from "next/link";
 export function SiteHeader() {
  return <header className="siteHeader"><div className="shell catalogueHeader">
  <Link className="logo" href="/" aria-label="Fırsatcı ana sayfa"><span className="logoSymbol" aria-hidden="true">f</span>fırsatcı<span className="logoDot">.</span></Link>
- <nav aria-label="Ana menü"><Link href="/#kategoriler">Kategoriler</Link><Link href="/#firsatlar">Tüm fırsatlar</Link><Link href="/#nasil">Nasıl çalışır?</Link></nav>
+ <nav aria-label="Ana menü"><Link href="/#kategoriler">Kategoriler</Link><Link href="/?secim=all#firsatlar">Tüm ürünler</Link><Link href="/brosurler">Broşürler</Link><Link href="/#nasil">Nasıl çalışır?</Link></nav>
  <span className="headerNote">İyi fiyatın peşinde.</span></div></header>;
 }
 export function SiteFooter() {
