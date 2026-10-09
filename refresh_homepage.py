@@ -43,10 +43,23 @@ def api(table, params=None, row=None):
         r=requests.get(BASE+'/rest/v1/'+table,headers=headers,params=params,timeout=30)
     r.raise_for_status()
     return r.json() if r.content else None
+def all_rows(table, params=None):
+    rows=[]; offset=0
+    while True:
+        page=api(table,dict(params or {},limit=500,offset=offset))
+        rows.extend(page)
+        if len(page)<500:
+            return rows
+        offset+=500
+
 def in_rows(table, values, select='*', extra=None):
     if not values:
         return []
-    return api(table,dict({'select':select,'id':'in.('+','.join(sorted(set(values)))+')'},**(extra or {})))
+    result=[]
+    ids=sorted(set(values))
+    for start in range(0,len(ids),80):
+        result.extend(all_rows(table,dict({'select':select,'id':'in.('+','.join(ids[start:start+80])+')'},**(extra or {}))))
+    return result
 def find_node():
     candidates=[os.getenv('HOMEPAGE_NODE',''),shutil.which('node'),
         str(Path.home()/'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe')]
@@ -80,17 +93,20 @@ def request_price(node, url, slug):
             return parse_html(node,r.text,url,current,slug)
     raise ValueError('redirect-limit')
 def pool(limit):
-    candidates=api('deal_candidates',{'select':'*','status':'eq.candidate','gap_percent':'gte.15',
-        'and':'(gap_percent.lt.70)','order':'gap_percent.desc','limit':60})
-    manual=api('homepage_manual_deals',{'select':'*','active':'eq.true','expires_at':'gt.'+utcnow(),'limit':30})
+    candidates=all_rows('deal_candidates',{'select':'*','status':'eq.candidate','gap_percent':'gte.15',
+        'and':'(gap_percent.lt.70)','order':'gap_percent.desc,id.asc'})
+    manual=all_rows('homepage_manual_deals',{'select':'*','active':'eq.true','expires_at':'gt.'+utcnow(),'order':'id.asc'})
     ids=[o for c in candidates for o in [c['cheapest_offer_id'],c['competitor_offer_id']] if o]
     offers={o['id']:o for o in in_rows('offers',ids)}
     merchants={m['id']:m for m in api('merchants',{'select':'id,slug,name'})}
     canonical_ids=[c['canonical_product_id'] for c in candidates]
     products={p['id']:p for p in in_rows('canonical_products',canonical_ids,extra={'active':'eq.true'})}
     variants={v['id']:v for v in in_rows('product_variants',[o['product_variant_id'] for o in offers.values() if o.get('product_variant_id')],extra={'active':'eq.true'})}
-    matches=api('product_matches',{'select':'canonical_product_id,product_id','status':'eq.approved',
-        'canonical_product_id':'in.('+','.join(sorted(set(canonical_ids)))+')'}) if canonical_ids else []
+    matches=[]
+    canonical_ids=sorted(set(canonical_ids))
+    for start in range(0,len(canonical_ids),80):
+        matches.extend(all_rows('product_matches',{'select':'canonical_product_id,product_id','status':'eq.approved',
+            'canonical_product_id':'in.('+','.join(canonical_ids[start:start+80])+')','order':'id.asc'}))
     approved={(m['canonical_product_id'],m['product_id']) for m in matches}
     tasks=[]
     for c in candidates:
@@ -106,10 +122,10 @@ def pool(limit):
         tasks.append({'id':'manual-'+d['id'],'candidate_id':None,'manual_id':d['id'],
                       'cheap':dict(d,merchant_id=(m or {}).get('id')),'rival':None,'product':d,
                       'valid':True,'expires_at':d['expires_at']})
-    previous=api('homepage_deals',{'select':'id,attempted_at'})
+    previous=all_rows('homepage_deals',{'select':'id,attempted_at','order':'id.asc'})
     last={p['id']:p['attempted_at'] for p in previous}
     tasks.sort(key=lambda t:last.get(t['id'],''))
-    return tasks[:limit],merchants
+    return (tasks[:limit] if limit else tasks),merchants
 async def refresh(args):
     node=find_node()
     if not node:
@@ -213,9 +229,9 @@ async def refresh(args):
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--apply',action='store_true')
-    parser.add_argument('--limit',type=int,default=90)
+    parser.add_argument('--limit',type=int,default=0)
     parser.add_argument('--budget',type=int,default=1100)
-    args=parser.parse_args();args.limit=max(1,min(args.limit,90))
+    args=parser.parse_args();args.limit=max(0,args.limit)
     # Scheduled Task also ignores overlaps; file lock protects manual invocation.
     (ROOT/'logs').mkdir(exist_ok=True)
     lock=(ROOT/'logs/homepage-refresh.lock').open('a+b')

@@ -52,3 +52,10 @@ export function catalogueEligible(row: Snapshot, now = Date.now()): boolean {
  return row.status==="unverified" && Number.isFinite(attempted) && attempted<=now+5000 && now-attempted<24*MAX_AGE_MS && expiry>now
   && temporary && !!String(row.title||"").trim() && !!safeDestination(row.affiliate_url||row.product_url,row.merchant_slug);
 }
+
+// Membership is supplied only by the private, approved-product catalogue RPC.
+export function activeCatalogueEligible(row:Snapshot,now=Date.now()):boolean {
+ const expiry=row.expires_at?Date.parse(String(row.expires_at)):Infinity;
+ return row.catalogue_active===true && expiry>now && !!String(row.title||'').trim()
+  && !!safeDestination(row.affiliate_url||row.product_url,row.merchant_slug);
+}

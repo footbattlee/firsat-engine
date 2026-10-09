@@ -4,6 +4,8 @@ const base=(process.env.SUPABASE_URL||"https://cmexmobjpeavlppmffqi.supabase.co"
 const key=process.env.SUPABASE_SERVICE_ROLE_KEY||"";
 export async function recordTraffic(req:Request,type:"pageview"|"outbound",path:string,listingId?:string,merchant?:string) {
  if(req.method==="HEAD"||!key)return;
+ // Local and deployment-preview verification must not inflate domain reports.
+ if(!["xn--frsatc-p9af.com","www.xn--frsatc-p9af.com"].includes(new URL(req.url).hostname))return;
  const event=trafficEvent(req.headers,type,path,key);
  // Known automated previews do not enter the website counters.
  if(["bot","prefetch"].includes(event.request_kind))return;

@@ -7,6 +7,13 @@ const base=env('SUPABASE_URL');
 const service=env('SUPABASE_SERVICE_ROLE_KEY')||(()=>{try{return JSON.parse(env('SUPABASE_SECRET_KEYS')).default||'';}catch{return '';}})();
 const sb=createClient(base,service);
 async function data(q:any){const r=await q;if(r.error)throw r.error;return r.data;}
+async function allRows(query:()=>any){
+ const rows:any[]=[];
+ for(let offset=0;;offset+=500){
+  const page=await data(query().range(offset,offset+499));rows.push(...page);
+  if(page.length<500)return rows;
+ }
+}
 const headers={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36','Accept-Language':'tr-TR,tr;q=0.9','Cache-Control':'no-cache','Accept':'text/html,application/xhtml+xml','Referer':'https://www.google.com/','Cookie':'i18n-prefs=TRY; lc-acbtr=tr_TR'};
 async function check(url:string,slug:string,debug=false){
  let current=url;
@@ -34,9 +41,9 @@ Deno.serve(async(req:Request)=>{
  try{
   const body=await req.json().catch(()=>({}));
   const [candidates,manual,previous]=await Promise.all([
-   data(sb.from('deal_candidates').select('*').eq('status','candidate').gte('gap_percent',15).lt('gap_percent',70).order('gap_percent',{ascending:false}).limit(60)),
-   data(sb.from('homepage_manual_deals').select('*').eq('active',true).gt('expires_at',new Date().toISOString()).limit(30)),
-   data(sb.from('homepage_deals').select('id,attempted_at,price_checked_at,status')),
+   allRows(()=>sb.from('deal_candidates').select('*').eq('status','candidate').gte('gap_percent',15).lt('gap_percent',70).order('gap_percent',{ascending:false}).order('id')),
+   allRows(()=>sb.from('homepage_manual_deals').select('*').eq('active',true).gt('expires_at',new Date().toISOString()).order('id')),
+   allRows(()=>sb.from('homepage_deals').select('id,attempted_at,price_checked_at,status').order('id')),
   ]);
   const active=new Set([...candidates.map((d:any)=>d.id),...manual.map((d:any)=>'manual-'+d.id)]);
   const removed=previous.filter((d:any)=>!active.has(d.id)).map((d:any)=>d.id);

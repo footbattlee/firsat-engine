@@ -4,7 +4,7 @@ Run `pnpm install --ignore-scripts`, then `pnpm build` or `pnpm dev`.
 Server-only environment: `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Never use a NEXT_PUBLIC service key.
 
 ## Price and link rules
-- The homepage reads private `homepage_deals` snapshots rather than historical deal candidate prices.
+- The homepage reads every active approved listing through private website_catalogue; prices still require a fresh homepage_deals snapshot.
 - Verified prices expire after 60 minutes; manual entries also expire at their specified time.
 - Automatic price comparisons require two currently verified stores, approved product matches, and a 15%–69.99% advantage.
 - Competitor prices are labelled as competitor prices, never as the product's previous price.
@@ -16,7 +16,7 @@ Server-only environment: `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Never u
 
 ## Refresh
 Deploy `supabase/functions/homepage-refresh`, apply `homepage_deals.sql`, and then `homepage_schedule.sql`.
-The private worker checks nine listings per call, three in parallel; a five-minute database schedule rotates through up to 60 candidates and 30 manual entries. The browser refreshes its listing once per minute while visible.
+The private worker checks nine listings per call, three in parallel; a five-minute database schedule rotates through all active candidates and manual entries. The browser refreshes its listing once per minute while visible.
 Authentication uses the existing private publication token from Vault. Public/anonymous calls cannot refresh prices or write data.
 
 **Current limitation:** direct cloud requests may return no Amazon buy box, or store HTTP 403/404. The worker deliberately fails closed. This does not mean the store is necessarily out of stock. A browser or an authorized store feed is needed before claiming continuous verified-price coverage; no paid proxy is enabled.
@@ -39,7 +39,7 @@ PC uyanık ve kullanıcı oturumu açık olmalıdır; ekran kilitli/kapalı olab
 Codex uygulamasının açık olması gerekmez. Kurulum uyku/güç ayarlarını değiştirmez.
 Görev kaçırılan gece saatlerini telafi etmez ve aynı anda ikinci çalışma açmaz.
 
-- `refresh_homepage.py` yalnızca ana sayfanın en fazla 60 aday + 30 manuel ürününü kontrol eder.
+- `refresh_homepage.py` tüm aktif aday ve manuel ürünleri üç paralel kontrolle dolaşır. Zaman bütçesi dolarsa kalanlar sonraki kontrolde öncelik alır.
 - Üç kontrol paraleldir; aynı mağazaya kontrol istekleri sırayla yapılır.
 - Doğrudan erişim yetmezse mevcut Chromium ile normal ürün sayfası okunur.
 - Ortak `homepage-refresh/price.mjs` fiyat, ürün kimliği, stok, minimum adet ve kupon kurallarını uygular.
@@ -61,3 +61,11 @@ Sosyal `/f` linkleri mevcut deal-click ölçümünden gelir; site ziyaretine ekl
 Günlük/haftalık rapor ve Telegram /rapor yeni biçimi kullanır.
 Ölçüm yayın tarihinden itibaren başlar; eski site ziyaretleri geri üretilemez.
 Rapor işlevi özel Vault anahtarıyla çağrılır; Reels dosyası silmez.
+
+## Full catalogue and product pages
+
+Apply supabase/website_catalogue.sql with the database migration tool. All three RPCs are service-role-only; no public database grants are added.
+
+The home lists every active approved candidate, with 24 cards per UI page, title/brand search, category and store filters. Categories use existing category labels plus conservative title rules; unknown products stay in Other. Category assignment is a display aid and never changes matching or collectors.
+
+/urun-detay/[id] shows approved matching offers, recorded scan prices with timestamps, and daily history. Only a fresh purchase-price snapshot is labeled current. The history reads existing price_history, takes the last in-stock record per offer per Istanbul day, and does not fill missing days or write half-hour checks. Offers with a different known GTIN, color, size or capacity are excluded from the detail comparison. /magaza/[id]?offer=... validates membership and redirects to the original affiliate URL with website outbound tracking.
