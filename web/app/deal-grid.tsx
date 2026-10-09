@@ -12,11 +12,13 @@ const PAGE_SIZE=24;
 const MODES=[["opportunity","Günün fırsatları"],["priced","Kontrol edilen fiyatlar"],["drop","Fiyatı düşenler"],["rival","Rakipten ucuz"],["all","Tüm ürünler"]] as const;
 const stringValue=(v:unknown)=>typeof v==="string"?v:"";
 export function DealGrid({deals,initial={}}:{deals:Deal[];initial?:Record<string,unknown>}){
- const [query,setQuery]=useState(stringValue(initial.q)),[store,setStore]=useState(stringValue(initial.magaza)||"all");
- const [category,setCategory]=useState(stringValue(initial.kategori)||"all"),[sort,setSort]=useState(stringValue(initial.sirala)||"advantage");
+ const q0=stringValue(initial.q),store0=stringValue(initial.magaza)||"all",category0=stringValue(initial.kategori)||"all",sort0=stringValue(initial.sirala)||"advantage";
  const requested=stringValue(initial.secim);
- const [mode,setMode]=useState(requested==="verified"?"rival":MODES.some(([id])=>id===requested)?requested:initial.kategori||initial.q?"all":"opportunity");
- const [page,setPage]=useState(Math.max(1,Number.parseInt(stringValue(initial.sayfa),10)||1));
+ const mode0=requested==="verified"?"rival":MODES.some(([id])=>id===requested)?requested:category0!=="all"||q0?"all":"opportunity";
+ const page0=Math.max(1,Number.parseInt(stringValue(initial.sayfa),10)||1);
+ const [query,setQuery]=useState(q0),[store,setStore]=useState(store0),[category,setCategory]=useState(category0),[sort,setSort]=useState(sort0),[mode,setMode]=useState(mode0),[page,setPage]=useState(page0);
+ // A same-page menu navigation supplies new filters without remounting the grid.
+ useEffect(()=>{setQuery(q0);setStore(store0);setCategory(category0);setSort(sort0);setMode(mode0);setPage(page0);},[initial,q0,store0,category0,sort0,mode0,page0]);
  const router=useRouter();
  useEffect(()=>{const refresh=()=>{if(document.visibilityState==="visible")router.refresh();};const timer=window.setInterval(refresh,60000);document.addEventListener("visibilitychange",refresh);return()=>{window.clearInterval(timer);document.removeEventListener("visibilitychange",refresh);};},[router]);
  useEffect(()=>{const params=new URLSearchParams();if(query)params.set("q",query);if(store!=="all")params.set("magaza",store);if(category!=="all")params.set("kategori",category);if(sort!=="advantage")params.set("sirala",sort);if(mode!=="opportunity")params.set("secim",mode);if(page>1)params.set("sayfa",String(page));window.history.replaceState(null,"","/"+(params.size?"?"+params:"")+window.location.hash);},[query,store,category,sort,mode,page]);
